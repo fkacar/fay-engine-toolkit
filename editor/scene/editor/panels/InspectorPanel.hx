@@ -235,7 +235,8 @@ class InspectorPanel {
   }
 
   function drawOptions(peers : Array<Component>, field : FieldInfo, label : String, before : String, options : Array<String>, canBeEmpty : Bool) {
-    if (!ImGui.beginCombo(label, before == "" ? "(yok)" : before)) return;
+    var preview = before == "" ? "(yok)" : options.indexOf(before) < 0 ? '$before (bulunamadı)' : before;
+    if (!ImGui.beginCombo(label, preview)) return;
     // hlimgui sabit değeri Ref sürümüne bağlar ve yerel kodda çöker: değer değişkenle verilir.
     var empty = before == "";
     if (canBeEmpty && ImGui.selectable("(yok)", empty)) set(peers, field, "");

@@ -53,17 +53,21 @@ class SceneCheck {
     if (!cls.meta.has(":component")) return;
     var ids = strings(cls.meta.extract(":component")).concat(strings(cls.meta.extract(":formerly")));
     var fields = new Map<String, String>();
+    var options = new Map<String, Array<String>>();
     var current = cls;
     while (current != null) {
       for (field in current.fields.get()) {
         if (!field.meta.has(":editable")) continue;
         var kind = TypeTools.toString(field.type);
-        fields.set(field.name, kind);
-        for (former in strings(field.meta.extract(":formerly"))) fields.set(former, kind);
+        var names = [field.name].concat(strings(field.meta.extract(":formerly")));
+        for (name in names) {
+          fields.set(name, kind);
+          if (field.meta.has(":choice")) options.set(name, strings(field.meta.extract(":choice")));
+        }
       }
       current = current.superClass == null ? null : current.superClass.t.get();
     }
-    schema.add(ids, fields);
+    schema.add(ids, fields, options);
   }
 
   static function strings(entries : Array<haxe.macro.Expr.MetadataEntry>) : Array<String> {

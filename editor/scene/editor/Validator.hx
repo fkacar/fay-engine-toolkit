@@ -30,6 +30,14 @@ class Validator {
     for (entity in scene.entities)
       for (component in entity.components)
         for (field in component.describeFields()) {
+          switch (field.hint) {
+            case HChoice(options):
+              var choice : String = component.readField(field.name);
+              if (options.indexOf(choice) < 0)
+                issues.push({entity: entity, message: '${entity.name}: geçersiz seçenek "$choice" (${field.label})'});
+              continue;
+            default:
+          }
           var isFile = field.hint == HAsset || field.hint == HPrefab;
           if (!isFile && field.hint != HEntity) continue;
           var value : String = component.readField(field.name);

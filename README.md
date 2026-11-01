@@ -59,6 +59,8 @@ Metin alanının anlamı işaretlenirse Inspector uygun girişi gösterir, kayı
 @:editable("Renk") @:color public var tint : Int = 0xFF8000;    // Renk seçici
 ```
 
+`@:choice` alanı `String` olmalı ve varsayılanı seçeneklerden biri olmalıdır. Seçenek koddan çıkarılınca o değeri kullanan sahne, prefab veya prefab farkı derlemeyi durdurur.
+
 Görseli `entity.object` altında olmayan bileşen (sahne köküne bağlı birim gibi) `visuals()` döndürür. Seçim ve gizleme bu görselleri de kapsar.
 
 Oyunda görünmeyen şekiller `drawOverlay(overlay, selected)` içinde çizilir. Hazır biçimler `OverlayShapes` içindedir.
@@ -127,6 +129,8 @@ Bildirim unutulursa derleme durur ve hangi sahnede hangi nesnenin etkilendiğini
 ```
 
 Bir bileşen veya alan bilerek silindiyse sahne dosyası da güncellenir.
+
+`@:choice` seçeneklerinin eski ad bildirimi yoktur. Seçenek silinir veya yeniden adlandırılırsa derleme durur, `res/scenes/` ve `res/prefabs/` altındaki değerler aynı commit'te değiştirilir.
 
 ## Sahne dosyası
 

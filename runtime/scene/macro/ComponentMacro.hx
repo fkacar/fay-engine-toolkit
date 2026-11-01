@@ -108,12 +108,23 @@ class ComponentMacro {
     var choice = Lambda.find(field.meta, entry -> entry.name == ":choice");
     if (choice != null) {
       var options = strings([choice]);
+      checkChoiceDefault(field, options);
       return macro scene.FieldInfo.FieldHint.HChoice($v{options});
     }
     var name = "HNone";
     for (hint in [":asset" => "HAsset", ":entity" => "HEntity", ":prefab" => "HPrefab", ":color" => "HColor"].keyValueIterator())
       if (Lambda.exists(field.meta, entry -> entry.name == hint.key)) name = hint.value;
     return macro $p{["scene", "FieldInfo", "FieldHint", name]};
+  }
+
+  // Seçenek silinip varsayılan değer unutulursa yeni nesneler geçersiz değerle oluşurdu.
+  static function checkChoiceDefault(field : Field, options : Array<String>) {
+    var value = switch (field.kind) {
+      case FVar(_, {expr: EConst(CString(text))}): text;
+      default: Context.error('@:choice alan ${field.name}: tip String olmalı ve varsayılan değeri sabit metin olmalı', field.pos);
+    };
+    if (options.indexOf(value) < 0)
+      Context.error('@:choice alan ${field.name}: varsayılan "$value" seçeneklerde yok (${options.join(", ")})', field.pos);
   }
 
   static function kindOf(field : Field) : String {

@@ -988,6 +988,49 @@ class TestMain {
     near(GizmoMath.signedAngle(new Vec3(1, 0, 0), new Vec3(0, -1, 0), new Vec3(0, 0, 1)), -Math.PI / 2, "negatif açı");
   }
 
+  // Koddan çıkarılan seçenek eski dosyalarda sessizce kalmamalı.
+  static function testChoiceValues() {
+    var schema = new SceneSchema();
+    var levels = ["kolay", "zor"];
+    schema.add(["trap", "old_trap"], ["level" => "String", "grade" => "String", "name" => "String"], ["level" => levels, "grade" => levels]);
+    function fileWith(type : String, field : String, value : String) {
+      var data = new SceneData(SceneFormat.VERSION);
+      var item = new EntityData("a", "Tuzak");
+      var component = new ComponentData(type);
+      component.fields.set(field, value);
+      item.components.push(component);
+      data.entities.push(item);
+      return SceneFormat.write(data);
+    }
+    equals(schema.check(fileWith("trap", "level", "zor")).length, 0, "geçerli seçenek");
+    var problems = schema.check(fileWith("trap", "level", "orta"));
+    equals(problems.length, 1, "koddan çıkarılan seçenek yakalanmalı");
+    check(problems[0].indexOf('"orta"') >= 0 && problems[0].indexOf("kolay, zor") >= 0, 'mesaj değeri ve seçenekleri söylemeli: ${problems[0]}');
+    equals(schema.check(fileWith("old_trap", "level", "orta")).length, 1, "eski bileşen kimliğinde de yakalanmalı");
+    equals(schema.check(fileWith("trap", "grade", "orta")).length, 1, "eski alan adında da yakalanmalı");
+    equals(schema.check(fileWith("trap", "name", "orta")).length, 0, "seçenek olmayan alan serbest");
+
+    var changed = instanceData("i", 0);
+    changed.entities[0].overrides.push(new scene.data.SceneData.OverrideData("h", "component:trap:level", "orta"));
+    equals(schema.check(SceneFormat.write(changed), _ -> true).length, 1, "prefab farkında da yakalanmalı");
+
+    var types = registry();
+    types.register(Pointer);
+    var scene = new SceneInstance(types, Editor, new Object());
+    var data = new SceneData(SceneFormat.VERSION);
+    var item = new EntityData("a", "Tuzak");
+    var pointer = new ComponentData("pointer");
+    pointer.fields.set("level", "orta");
+    item.components.push(pointer);
+    data.entities.push(item);
+    scene.load(data);
+    var issues = new Validator(_ -> true).run(scene);
+    equals(issues.length, 1, "editör geçersiz seçeneği göstermeli");
+    equals(scene.find("a").getComponent(Pointer).level, "orta", "değer sessizce değiştirilmemeli");
+    scene.find("a").getComponent(Pointer).level = "zor";
+    equals(new Validator(_ -> true).run(scene).length, 0, "düzeltilince uyarı kalkmalı");
+  }
+
   static function testValidator() {
     var types = new ComponentRegistry();
     types.register(Pointer);
@@ -1080,6 +1123,7 @@ class TestMain {
     testLockGroups();
     testPrefabs();
     testPrefabUndo();
+    testChoiceValues();
     testPrefabFailures();
     testPrefabSchema();
     testGizmoMath();
