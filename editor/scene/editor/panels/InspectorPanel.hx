@@ -13,18 +13,19 @@ import scene.editor.commands.SetNameCommand;
 import scene.editor.commands.SetTransformCommand;
 import scene.editor.commands.SetTransformCommand.Transform;
 
-// Birden çok nesne seçiliyse değişiklik hepsine uygulanır. Bileşen alanları yalnızca
-// seçilenlerin tümünde o bileşen varsa görünür.
+// Birlikte düzenleme kilit ister. Kilitli grupta bileşen alanları hepsine uygulanır, yalnızca
+// grubun tümünde o bileşen varsa görünür. Dönüşüm gizmodadır: grup tek parça gibi döner, burada
+// tek bir değer yazmak nesnelerin düzenini bozardı.
 class InspectorPanel {
   static inline var ADD_COMPONENT = "add-component";
-  static inline var PIN_TIP = "Seçim değişse de Inspector bu nesnelerde kalır.";
   static inline var MIXED = "karışık";
   static inline var NUMBER = "%.6f";
+  static inline var LABEL_SAMPLE = "Yükseklik ";
+  static inline var LABEL_SHARE = 0.35;
 
   var editor : Editor;
-  var pinned : Array<Entity> = [];
   var nameStart = "";
-  var transformStarts : Array<Transform> = [];
+  var transformStart : Transform;
   var fieldStarts : Array<Dynamic> = [];
   var removing : Null<Array<Component>>;
 
@@ -33,17 +34,23 @@ class InspectorPanel {
   }
 
   public function draw() {
-    var entities = targets();
+    var entities = editor.selection.items;
     if (entities.length == 0) {
       ImGui.textDisabled("Bir nesne seç");
       return;
     }
+    if (!editor.canEdit()) {
+      ImGui.textWrapped('${entities.length} nesne seçili. Birlikte düzenlemek için araç çubuğundaki Kilitle düğmesine bas.');
+      return;
+    }
     var primary = entities[entities.length - 1];
-    drawPin(entities);
-    if (entities.length > 1) ImGui.textDisabled('${entities.length} nesne birlikte düzenleniyor');
+    // Etiketler alanın sağındadır: dar panelde kesilmesin diye yer önce onlara ayrılır.
+    ImGui.pushItemWidth(-Math.max(ImGui.calcTextSize(LABEL_SAMPLE).x, ImGui.getContentRegionAvail().x * LABEL_SHARE));
+    var together = entities.length > 1;
+    if (together) ImGui.textWrapped('${entities.length} nesne kilitli. Sahnede tek parça gibi taşınır, döner ve ölçeklenir.');
     else drawName(primary);
     drawVisibility(entities);
-    if (ImGui.collapsingHeader("Dönüşüm", ImGuiTreeNodeFlags.DefaultOpen)) drawTransform(entities);
+    if (!together && ImGui.collapsingHeader("Dönüşüm", ImGuiTreeNodeFlags.DefaultOpen)) drawTransform(primary);
     for (component in primary.components) {
       var peers = peersOf(component, entities);
       if (peers != null) drawComponent(peers);
@@ -54,17 +61,7 @@ class InspectorPanel {
       removing = null;
     }
     drawAddComponent(entities);
-  }
-
-  function targets() {
-    pinned = pinned.filter(entity -> editor.scene.contains(entity));
-    return pinned.length > 0 ? pinned : editor.selection.items;
-  }
-
-  function drawPin(entities : Array<Entity>) {
-    var locked = pinned.length > 0;
-    if (ImGui.checkbox("Kilitle", locked)) pinned = locked ? entities.copy() : [];
-    if (ImGui.isItemHovered()) ImGui.setTooltip(PIN_TIP);
+    ImGui.popItemWidth();
   }
 
   function drawName(entity : Entity) {
@@ -89,29 +86,24 @@ class InspectorPanel {
     }
   }
 
-  function drawTransform(entities : Array<Entity>) {
-    drag(entities, "Konum X", e -> e.x, 0.1, (e, v) -> e.setPosition(v, e.y, e.z));
-    drag(entities, "Konum Y", e -> e.y, 0.1, (e, v) -> e.setPosition(e.x, v, e.z));
-    drag(entities, "Konum Z", e -> e.z, 0.1, (e, v) -> e.setPosition(e.x, e.y, v));
-    drag(entities, "Dönüş X", e -> e.rotX, 1, (e, v) -> e.setRotation(v, e.rotY, e.rotZ));
-    drag(entities, "Dönüş Y", e -> e.rotY, 1, (e, v) -> e.setRotation(e.rotX, v, e.rotZ));
-    drag(entities, "Dönüş Z", e -> e.rotZ, 1, (e, v) -> e.setRotation(e.rotX, e.rotY, v));
-    drag(entities, "Ölçek X", e -> e.scaleX, 0.01, (e, v) -> e.setScale(v, e.scaleY, e.scaleZ));
-    drag(entities, "Ölçek Y", e -> e.scaleY, 0.01, (e, v) -> e.setScale(e.scaleX, v, e.scaleZ));
-    drag(entities, "Ölçek Z", e -> e.scaleZ, 0.01, (e, v) -> e.setScale(e.scaleX, e.scaleY, v));
+  function drawTransform(entity : Entity) {
+    drag(entity, "Konum X", entity.x, 0.1, v -> entity.setPosition(v, entity.y, entity.z));
+    drag(entity, "Konum Y", entity.y, 0.1, v -> entity.setPosition(entity.x, v, entity.z));
+    drag(entity, "Konum Z", entity.z, 0.1, v -> entity.setPosition(entity.x, entity.y, v));
+    drag(entity, "Dönüş X", entity.rotX, 1, v -> entity.setRotation(v, entity.rotY, entity.rotZ));
+    drag(entity, "Dönüş Y", entity.rotY, 1, v -> entity.setRotation(entity.rotX, v, entity.rotZ));
+    drag(entity, "Dönüş Z", entity.rotZ, 1, v -> entity.setRotation(entity.rotX, entity.rotY, v));
+    drag(entity, "Ölçek X", entity.scaleX, 0.01, v -> entity.setScale(v, entity.scaleY, entity.scaleZ));
+    drag(entity, "Ölçek Y", entity.scaleY, 0.01, v -> entity.setScale(entity.scaleX, v, entity.scaleZ));
+    drag(entity, "Ölçek Z", entity.scaleZ, 0.01, v -> entity.setScale(entity.scaleX, entity.scaleY, v));
   }
 
-  function drag(entities : Array<Entity>, label : String, read : Entity->Float, speed : Float, apply : (Entity, Float)->Void) {
-    var value = read(entities[entities.length - 1]);
-    var mixed = Lambda.exists(entities, entity -> read(entity) != value);
-    var edited = ImGui.dragDouble(label, value, speed, 0, 0, mixed ? MIXED : NUMBER);
-    if (ImGui.isItemActivated()) transformStarts = [for (entity in entities) SetTransformCommand.capture(entity)];
-    if (edited) for (entity in entities) apply(entity, value);
-    if (!ImGui.isItemDeactivatedAfterEdit()) return;
-    var commands : Array<Command> = [
-      for (i in 0...entities.length) new SetTransformCommand(entities[i], transformStarts[i], SetTransformCommand.capture(entities[i]))
-    ];
-    editor.commands.execute(new GroupCommand("Dönüşüm", commands));
+  function drag(entity : Entity, label : String, value : Float, speed : Float, apply : Float->Void) {
+    var edited = ImGui.dragDouble(label, value, speed);
+    if (ImGui.isItemActivated()) transformStart = SetTransformCommand.capture(entity);
+    if (edited) apply(value);
+    if (ImGui.isItemDeactivatedAfterEdit())
+      editor.commands.execute(new SetTransformCommand(entity, transformStart, SetTransformCommand.capture(entity)));
   }
 
   // Sona asıl bileşen konur: alanlar ondan okunur.

@@ -21,6 +21,8 @@ typedef Panel = {
 // zemin ve asset türleri actions üzerinden eklenir.
 class Editor {
   static inline var LAYOUT_FILE = "imgui.ini";
+  // Düzen değişince artırılır: eski ölçülerle kaydedilmiş panel düzeni bir kez yenilenir.
+  static inline var LAYOUT_VERSION = 2;
   static inline var FONT_PATH = "libs/scene-toolkit/editor/fonts/DejaVuSansMono.ttf";
   static inline var FONT_SIZE = 15;
   static inline var HIERARCHY = "Hierarchy";
@@ -44,6 +46,7 @@ class Editor {
   public var scene(default, null) : SceneInstance;
   public var commands(default, null) = new CommandStack();
   public var selection(default, null) = new Selection();
+  public var groups(default, null) = new LockGroups();
   public var validator(default, null) : Validator;
   public var document(default, null) : SceneDocument;
   public var actions(default, null) : SceneActions;
@@ -89,8 +92,10 @@ class Editor {
     FocusGuard.install();
     window.addEventTarget(e -> if (e.kind == EFocusLost) trace.record("odak kaybi"));
 
+    selection.expand = entities -> groups.expand(entities, scene);
     validator = new Validator(assetExists);
     document = new SceneDocument(this, scene, path);
+    if (document.prefs.layoutVersion != LAYOUT_VERSION) layoutPending = true;
     actions = new SceneActions(this);
     viewport = new Viewport(this, scene.root.getScene().camera);
     hierarchy = new HierarchyPanel(this);
@@ -149,6 +154,24 @@ class Editor {
     return Key.isDown(Key.CTRL) || Key.isDown(Key.LEFT_WINDOW_KEY) || Key.isDown(Key.RIGHT_WINDOW_KEY);
   }
 
+  // Tek nesne her zaman düzenlenir, birden çoğu için kilit gerekir.
+  public function canEdit() {
+    return selection.items.length < 2 || groups.isLocked(selection.items);
+  }
+
+  public function toggleLock() {
+    var items = selection.items;
+    if (items.length < 2) {
+      show("Kilitlemek için birden çok nesne seç");
+      return;
+    }
+    var locked = groups.isLocked(items);
+    if (locked) groups.unlock(items);
+    else groups.lock(items);
+    document.rememberFlags();
+    show(locked ? "Kilit açıldı" : '${items.length} nesne kilitlendi');
+  }
+
   public function requestOpen(path : String) {
     guard(() -> document.open(path));
   }
@@ -203,12 +226,12 @@ class Editor {
     if (Key.isPressed(Key.F2)) hierarchy.rename(selection.primary);
     if (Key.isPressed(Key.F)) actions.focus();
     if (Key.isPressed(Key.END)) actions.snapToGround();
+    if (Key.isPressed(Key.L)) toggleLock();
     if (Key.isPressed(Key.ESCAPE)) selection.clear();
     if (Key.isPressed(Key.DELETE) || Key.isPressed(Key.BACKSPACE)) actions.remove();
-    if (viewport.isFlying) return;
-    if (Key.isPressed(Key.W)) viewport.gizmo.tool = Move;
-    if (Key.isPressed(Key.E)) viewport.gizmo.tool = Rotate;
-    if (Key.isPressed(Key.R)) viewport.gizmo.tool = Scale;
+    if (Key.isPressed(Key.NUMBER_1)) viewport.gizmo.tool = Move;
+    if (Key.isPressed(Key.NUMBER_2)) viewport.gizmo.tool = Rotate;
+    if (Key.isPressed(Key.NUMBER_3)) viewport.gizmo.tool = Scale;
   }
 
   function undo() {
@@ -250,6 +273,7 @@ class Editor {
     }
     if (ImGui.beginMenu("Görünüm")) {
       if (ImGui.menuItem("Editörde gizlenenleri göster")) document.showAll();
+      if (ImGui.menuItem("Panel düzenini sıfırla")) layoutPending = true;
       ImGui.endMenu();
     }
     if (ImGui.beginMenu("Oyun")) {
@@ -370,6 +394,7 @@ class Editor {
       layoutPending = false;
       showAssets = true;
       buildDefaultLayout(dock, width, height);
+      document.prefs.setLayoutVersion(LAYOUT_VERSION);
     }
     ImGui.dockSpace(dock, null, ImGuiDockNodeFlags.PassthruCentralNode);
     var center = ImGui.dockBuilderGetCentralNode(dock);

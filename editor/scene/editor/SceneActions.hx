@@ -94,6 +94,10 @@ class SceneActions {
   }
 
   public function snapToGround() {
+    if (!editor.canEdit()) {
+      editor.show("Birlikte düzenlemek için önce kilitle");
+      return;
+    }
     var moves : Array<Command> = [];
     for (entity in editor.selection.roots()) {
       var offset = groundOffset(entity);

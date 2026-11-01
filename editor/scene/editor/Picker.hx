@@ -11,7 +11,7 @@ class Picker {
   public static function pick(scene : SceneInstance, ray : Ray, limit : Float) : Null<Entity> {
     var best = null, nearest = limit;
     for (entity in scene.entities) {
-      if (!entity.isShown() || entity.lockedInEditor) continue;
+      if (!entity.isShown()) continue;
       var distance = rayDistance(entity, ray);
       if (distance < 0 || distance >= nearest) continue;
       nearest = distance;

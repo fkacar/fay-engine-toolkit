@@ -12,9 +12,10 @@ class EditorPrefs {
   static inline var MAX_RECENT = 8;
 
   public var recent(default, null) : Array<String> = [];
+  public var layoutVersion(default, null) = 0;
 
   var hidden : DynamicAccess<Array<String>> = {};
-  var locked : DynamicAccess<Array<String>> = {};
+  var groups : DynamicAccess<Array<Array<String>>> = {};
 
   public function new() {
     if (!FileSystem.exists(FILE)) return;
@@ -22,10 +23,16 @@ class EditorPrefs {
       var saved = haxe.Json.parse(File.getContent(FILE));
       if (saved.recent != null) recent = saved.recent;
       if (saved.hidden != null) hidden = saved.hidden;
-      if (saved.locked != null) locked = saved.locked;
+      if (saved.groups != null) groups = saved.groups;
+      if (saved.layoutVersion != null) layoutVersion = saved.layoutVersion;
     } catch (e : Dynamic) {
       // Bozuk ayar dosyası editörü durdurmamalı, varsayılanlarla devam edilir.
     }
+  }
+
+  public function setLayoutVersion(version : Int) {
+    layoutVersion = version;
+    save();
   }
 
   public function addRecent(path : String) {
@@ -45,24 +52,21 @@ class EditorPrefs {
     return ids == null ? [] : ids;
   }
 
-  public function lockedIn(scene : String) : Array<String> {
-    var ids = locked.get(scene);
-    return ids == null ? [] : ids;
+  public function groupsIn(scene : String) : Array<Array<String>> {
+    var saved = groups.get(scene);
+    return saved == null ? [] : saved;
   }
 
-  public function setFlags(scene : String, hiddenIds : Array<String>, lockedIds : Array<String>) {
-    store(hidden, scene, hiddenIds);
-    store(locked, scene, lockedIds);
+  public function setFlags(scene : String, hiddenIds : Array<String>, groupIds : Array<Array<String>>) {
+    if (hiddenIds.length == 0) hidden.remove(scene);
+    else hidden.set(scene, hiddenIds);
+    if (groupIds.length == 0) groups.remove(scene);
+    else groups.set(scene, groupIds);
     save();
-  }
-
-  static function store(flags : DynamicAccess<Array<String>>, scene : String, ids : Array<String>) {
-    if (ids.length == 0) flags.remove(scene);
-    else flags.set(scene, ids);
   }
 
   function save() {
     if (!FileSystem.exists(DIRECTORY)) FileSystem.createDirectory(DIRECTORY);
-    File.saveContent(FILE, haxe.Json.stringify({recent: recent, hidden: hidden, locked: locked}, null, "  "));
+    File.saveContent(FILE, haxe.Json.stringify({recent: recent, hidden: hidden, groups: groups, layoutVersion: layoutVersion}, null, "  "));
   }
 }

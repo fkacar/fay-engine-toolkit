@@ -22,6 +22,8 @@ cd ../yeni-oyun
 
 Şablon araç takımını `libs/scene-toolkit` altına git submodule olarak ekler ve bulunduğun commit'e sabitler.
 
+Toolkit ve oyun birlikte `./push.sh "mesaj"` ile gönderilir, sıra elle yönetilmez. Ayrıntı için `tools/push.sh` başındaki açıklamaya bak.
+
 ## Oyuna bağlama
 
 Oyunlar bu repoyu `libs/scene-toolkit` yoluna submodule olarak ekler. Klonlarken `git clone --recursive` kullanılır. Sonradan alınan değişiklikler için `git submodule update --init --recursive` çalıştırılır.
@@ -105,6 +107,8 @@ editor.addPanel("Fraksiyonlar", drawFactions);                 // Oyuna özel pa
 - Seçim mesh üçgenlerine bakar. Heaps indekssiz `Polygon` için çarpışma verisi üretemez, `Picker` bunları kendi üçgen testiyle tarar. Yeni bir primitive türü `getCollider` veremezse seçici sınır kutusuna düşer, geniş bir kutu bütün tıklamaları yutar.
 - `ModelLibrary.load` modeli tek önbellekten verir, kopyalar geometri ve dokuyu paylaşır. Bileşenler `ModelCache` açmamalı.
 - `FocusGuard.install()` odak kaybında tuşları bırakır. Heaps bunu yapmaz, Cmd+Tab veya Alt+Tab sonrası tuş basılı kalır. Editör kendisi kurar, oyun `init` içinde çağırır.
+- Heaps kamerası sol ellidir: ekranın sağı bakış yönünün saat yönünün tersindedir. Kamera yönleri kendi vektörleriyle değil, noktanın ekranda gittiği yerle test edilir.
+- Heaps yatay tekerlek değerini atar. Mac'teki yamalı `hxd.Window` bunu `horizontalWheel` alanında saklar, Option + iki parmak böyle döndürür. Windows'ta bu değer yoktur, orada Ctrl + iki parmak döndürür. `hlsdl` iki değeri de tam sayıya keser, 1'in altındaki çok yavaş kaydırma kaybolur.
 - ImGui çizim listesi renkleri `0xAARRGGBB` biçimindedir.
 - hlimgui bağlamasında iki tuzak var: `selectable` sabit `true`/`false` ile çöker, değer değişkenle verilir. `getColorU32(ImGuiCol.X)` saydam döner, `getStyleColorVec4` kullanılır.
 

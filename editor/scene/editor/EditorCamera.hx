@@ -13,6 +13,8 @@ class EditorCamera {
   static inline var MAX_WHEEL = 2.;       // trackpad'in hızlı kaydırması tek karede fırlatmasın
   static inline var SPEED_STEP = 1.2;
   static inline var BOOST = 3.;
+  static inline var TURN_SPEED = 1.7;     // rad/sn, oyundaki Q E ile aynı
+  static inline var TILT_SPEED = 1.2;     // rad/sn, oyundaki R F ile aynı
   static inline var MIN_DISTANCE = 1.;
   static inline var FOCUS_MARGIN = 3.6;
   static inline var FOCUS_SMOOTHING = 12.;
@@ -40,13 +42,14 @@ class EditorCamera {
     return new Vec3(Math.cos(yaw) * flat, Math.sin(yaw) * flat, Math.sin(pitch));
   }
 
+  // Heaps sol ellidir: ekranın sağı bakış yönünün saat yönünün tersindedir.
   public function right() {
-    return new Vec3(Math.sin(yaw), -Math.cos(yaw), 0);
+    return new Vec3(-Math.sin(yaw), Math.cos(yaw), 0);
   }
 
   public function look(dx : Float, dy : Float) {
     goal = null;
-    yaw -= dx * LOOK_SPEED;
+    yaw += dx * LOOK_SPEED;
     pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, pitch - dy * LOOK_SPEED));
   }
 
@@ -60,7 +63,7 @@ class EditorCamera {
   public function pan(dx : Float, dy : Float, screenHeight : Float) {
     goal = null;
     var unit = 2 * distance * Math.tan(camera.fovY * Math.PI / 360) / screenHeight;
-    var up = right().cross(forward());
+    var up = forward().cross(right());
     position = position.sub(right().scale(dx * unit)).add(up.scale(dy * unit));
   }
 
@@ -77,11 +80,50 @@ class EditorCamera {
   }
 
   public function fly(dt : Float) {
-    var right = axis(Key.D, Key.A), ahead = axis(Key.W, Key.S), rise = axis(Key.E, Key.Q);
+    var right = axis(Key.D, Key.A) + axis(Key.RIGHT, Key.LEFT), ahead = axis(Key.W, Key.S) + axis(Key.UP, Key.DOWN);
+    var rise = axis(Key.E, Key.Q);
     if (right == 0 && ahead == 0 && rise == 0) return;
     goal = null;
     var step = speed * dt * (Key.isDown(Key.SHIFT) ? BOOST : 1);
     position = position.add(forward().scale(ahead * step)).add(this.right().scale(right * step)).add(new Vec3(0, 0, rise * step));
+  }
+
+  // Sağ tık gerekmez, trackpad'de klavyeyle gezmenin yolu budur. Oyundaki gibi zemine
+  // paralel kayar, yükseklik değişmez. Shift + oklar Google Maps'teki gibi döndürür ve eğer.
+  public function drive(dt : Float) {
+    var shift = Key.isDown(Key.SHIFT);
+    var side = axis(Key.RIGHT, Key.LEFT), along = axis(Key.UP, Key.DOWN);
+    var right = axis(Key.D, Key.A) + (shift ? 0 : side), ahead = axis(Key.W, Key.S) + (shift ? 0 : along);
+    if (right != 0 || ahead != 0) {
+      goal = null;
+      var step = speed * dt * (Key.isDown(Key.SHIFT) ? BOOST : 1);
+      var flat = new Vec3(Math.cos(yaw), Math.sin(yaw), 0);
+      position = position.add(flat.scale(ahead * step)).add(this.right().scale(right * step));
+    }
+    var turn = axis(Key.E, Key.Q) + (shift ? side : 0), tilt = axis(Key.R, Key.F) - (shift ? along : 0);
+    if (turn != 0 || tilt != 0) orbit(turn * TURN_SPEED * dt / LOOK_SPEED, tilt * TILT_SPEED * dt / LOOK_SPEED);
+  }
+
+  public static function isTurning() {
+    var arrows = Key.isDown(Key.LEFT) || Key.isDown(Key.RIGHT) || Key.isDown(Key.UP) || Key.isDown(Key.DOWN);
+    return Key.isDown(Key.Q) || Key.isDown(Key.E) || Key.isDown(Key.R) || Key.isDown(Key.F) || (arrows && Key.isDown(Key.SHIFT));
+  }
+
+  // İmlecin altındaki nokta ekranda yerinde kalır: kamera o noktaya giden çizgide ilerler.
+  public function zoomAt(wheel : Float, point : Vec3) {
+    goal = null;
+    var amount = Math.max(-MAX_WHEEL, Math.min(MAX_WHEEL, wheel));
+    var toPoint = point.sub(position);
+    var factor = 1 - Math.exp(-DOLLY_STEP * amount);
+    factor = Math.min(factor, 1 - MIN_DISTANCE / Math.max(toPoint.length(), MIN_DISTANCE));
+    position = position.add(toPoint.scale(factor));
+    distance = Math.max(distance * (1 - factor), MIN_DISTANCE);
+  }
+
+  // Tutulan zemin noktası imlecin altında kalsın diye kamera ters yönde kayar.
+  public function grab(from : Vec3, to : Vec3) {
+    goal = null;
+    position = position.add(from.sub(to));
   }
 
   public function changeSpeed(wheel : Float) {

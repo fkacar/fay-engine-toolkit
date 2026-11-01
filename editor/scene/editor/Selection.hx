@@ -6,11 +6,13 @@ import scene.SceneInstance;
 class Selection {
   public var items(default, null) : Array<Entity> = [];
   public var primary(get, never) : Null<Entity>;
+  // Kilitli nesneler birlikte seçilir: liste grubun tamamına genişletilir.
+  public var expand : Array<Entity>->Array<Entity> = entities -> entities;
 
   public function new() {}
 
   public function set(entities : Array<Entity>) {
-    items = entities.copy();
+    items = expand(entities.copy());
   }
 
   public function clear() {
@@ -22,11 +24,15 @@ class Selection {
   }
 
   public function add(entity : Entity) {
-    if (!has(entity)) items.push(entity);
+    for (member in expand([entity])) if (!has(member)) items.push(member);
   }
 
   public function toggle(entity : Entity) {
-    if (!items.remove(entity)) items.push(entity);
+    if (!has(entity)) {
+      add(entity);
+      return;
+    }
+    for (member in expand([entity])) items.remove(member);
   }
 
   // Geri alma nesneyi sahneden çıkarmış olabilir.

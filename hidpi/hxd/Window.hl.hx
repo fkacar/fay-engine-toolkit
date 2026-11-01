@@ -1,5 +1,6 @@
 // Heaps 2.1.0 hxd/Window.hl.hx kopyası (MIT, bkz. ../LICENSE_HEAPS).
-// "HiDPI" ile işaretli satırlar dışında özgün dosyayla aynıdır, Heaps yükseltilirken yeniden uygulanır.
+// "HiDPI" ve "Yatay kaydırma" ile işaretli satırlar dışında özgün dosyayla aynıdır, Heaps
+// yükseltilirken yeniden uygulanır.
 package hxd;
 import hxd.Key in K;
 import hxd.impl.MouseMode;
@@ -86,6 +87,8 @@ class Window {
 	var windowHeight = 600;
 	// HiDPI: SDL pencereyi noktayla, Heaps pikselle ölçer. Retina'da bir nokta iki pikseldir.
 	public var pixelDensity(default, null) = 1.;
+	// Yatay kaydırma: hlsdl değeri mouseX alanına yazar, Heaps atar. Okuyan sıfırlar.
+	public var horizontalWheel = 0;
 	var curMouseX = 0;
 	var curMouseY = 0;
 	var startMouseX = 0;
@@ -492,6 +495,7 @@ class Window {
 					eh = new Event(EMove, curMouseX, curMouseY);
 			}
 		case MouseWheel:
+			horizontalWheel += e.mouseX; // Yatay kaydırma
 			eh = new Event(EWheel, mouseX, mouseY);
 			eh.wheelDelta = -e.wheelDelta;
 		#if hlsdl

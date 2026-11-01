@@ -115,8 +115,7 @@ class SceneDocument {
 
   public function rememberFlags() {
     var hidden = [for (entity in scene.entities) if (entity.hiddenInEditor) entity.id];
-    var locked = [for (entity in scene.entities) if (entity.lockedInEditor) entity.id];
-    prefs.setFlags(path, hidden, locked);
+    prefs.setFlags(path, hidden, editor.groups.toIds());
   }
 
   public function showAll() {
@@ -174,10 +173,7 @@ class SceneDocument {
       var entity = scene.find(id);
       if (entity != null) entity.hiddenInEditor = true;
     }
-    for (id in prefs.lockedIn(path)) {
-      var entity = scene.find(id);
-      if (entity != null) entity.lockedInEditor = true;
-    }
+    editor.groups.load(prefs.groupsIn(path), scene);
   }
 
   function autosavePath() {

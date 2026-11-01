@@ -9,9 +9,9 @@ import scene.editor.commands.SetNameCommand;
 class HierarchyPanel {
   static inline var PAYLOAD = "ENTITY";
   static inline var RENAME_WAIT_FRAMES = 4;
+  static inline var COLUMNS = 2.1;
   static inline var EDITOR_TIP = "Editörde görünür. Yalnızca bu bilgisayarı etkiler, sahneye yazılmaz.";
   static inline var GAME_TIP = "Oyunda görünür. Sahneye kaydedilir, editörde görünmeye devam eder.";
-  static inline var LOCK_TIP = "Kilitli: sahnede tıklanamaz, buradan seçilebilir. Yalnızca bu bilgisayarı etkiler.";
 
   var editor : Editor;
   var renaming : Null<Entity>;
@@ -23,7 +23,7 @@ class HierarchyPanel {
   var opening = new Map<Entity, Bool>();
   var deferred : Array<Void->Void> = [];
   var payload = new hl.Bytes(1);
-  var togglesAt = 0.;
+  var rowStart = 0.;
   var toggleStep = 0.;
 
   public function new(editor : Editor) {
@@ -32,7 +32,7 @@ class HierarchyPanel {
 
   public function draw() {
     drawHeader();
-    for (entity in editor.scene.entities) if (entity.parent == null) drawEntity(entity);
+    for (entity in editor.scene.entities) if (entity.parent == null) drawEntity(entity, 0);
     drawEmptyArea();
     // Ağaç çizilirken sahne değişmemeli, işler çizimden sonra yapılır.
     for (action in deferred) action();
@@ -62,33 +62,35 @@ class HierarchyPanel {
     }
   }
 
-  // İşaretler sağda sabit sütundadır: girintiye göre kaymaz, satırlar göz yormaz.
+  // Kutular solda sabit sütundadır, ağaç sağında başlar: Unity'deki gibi ad ne kadar uzun
+  // olursa olsun kutuların üstüne binmez, girinti de kutuları kaydırmaz.
   function drawHeader() {
     toggleStep = ImGui.getTextLineHeightWithSpacing();
-    var width = ImGui.getWindowSize().x - ImGui.getStyle().ScrollbarSize;
-    togglesAt = width - toggleStep * 3.5;
+    rowStart = ImGui.getCursorPosX();
     drawColumnTitle("E", 0, EDITOR_TIP);
     drawColumnTitle("O", 1, GAME_TIP);
-    drawColumnTitle("K", 2, LOCK_TIP);
   }
 
   function drawColumnTitle(title : String, column : Int, tip : String) {
-    ImGui.sameLine(togglesAt + toggleStep * column);
+    // Harf kutunun ortasına gelsin.
+    ImGui.sameLine(rowStart + toggleStep * column + (ImGui.getFontSize() - ImGui.calcTextSize(title).x) * 0.5);
     ImGui.textDisabled(title);
     if (ImGui.isItemHovered()) ImGui.setTooltip(tip);
   }
 
-  function drawEntity(entity : Entity) {
+  function drawEntity(entity : Entity, depth : Int) {
+    drawToggles(entity);
+    ImGui.sameLine(rowStart + toggleStep * COLUMNS + depth * ImGui.getStyle().IndentSpacing);
     if (opening.remove(entity)) ImGui.setNextItemOpen(true);
     var selection = editor.selection;
-    var flags = ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.SpanAvailWidth | ImGuiTreeNodeFlags.AllowItemOverlap;
+    var flags = ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.SpanAvailWidth;
     if (selection.has(entity)) flags |= ImGuiTreeNodeFlags.Selected;
     if (entity.children.length == 0) flags |= ImGuiTreeNodeFlags.Leaf;
 
     var dim = !entity.active || entity.hiddenInEditor;
     // getColorU32 renk kimliğini değer sanar ve saydam döner, bu yüzden Vec4 sürümü kullanılır.
     if (dim) ImGui.pushStyleColor(ImGuiCol.Text, ImGui.getStyleColorVec4(ImGuiCol.TextDisabled));
-    var label = renaming == entity ? "" : entity.active ? entity.name : entity.name + " (oyunda kapalı)";
+    var label = renaming == entity ? "" : rowLabel(entity);
     var open = ImGui.treeNodeEx(entity.id, flags, label);
     if (dim) ImGui.popStyleColor();
 
@@ -96,29 +98,27 @@ class HierarchyPanel {
     drawMenu(entity);
     drawDrag(entity);
     if (renaming == entity) drawRename(entity);
-    drawToggles(entity);
 
     if (!open) return;
-    for (child in entity.children) drawEntity(child);
+    for (child in entity.children) drawEntity(child, depth + 1);
     ImGui.treePop();
   }
 
-  // Görünürlük kutuları satırın üstünde durur: oradaki tıklama satıra sayılmaz.
-  function isOverLabel() {
-    return ImGui.getMousePos().x - ImGui.getWindowPos().x < togglesAt;
+  function rowLabel(entity : Entity) {
+    var label = entity.active ? entity.name : entity.name + " (oyunda kapalı)";
+    return editor.groups.groupOf(entity) == null ? label : label + " (kilitli)";
   }
 
   function readClick(entity : Entity) {
     var selection = editor.selection;
-    var onLabel = isOverLabel();
-    if (onLabel && ImGui.isItemClicked() && !ImGui.isItemToggledOpen()) {
+    if (ImGui.isItemClicked() && !ImGui.isItemToggledOpen()) {
       if (Key.isDown(Key.SHIFT) || editor.isCommandHeld()) selection.toggle(entity);
       else if (selection.has(entity)) pressed = entity;
       else selection.set([entity]);
     }
     // Çoklu seçimde sürükleme başlayabilir, tek seçime ancak bırakınca düşülür.
     if (pressed == entity && ImGui.isMouseReleased(0) && dragged.length == 0) selection.set([entity]);
-    if (onLabel && ImGui.isItemHovered() && ImGui.isMouseDoubleClicked(0)) rename(entity);
+    if (ImGui.isItemHovered() && ImGui.isMouseDoubleClicked(0)) rename(entity);
   }
 
   function drawMenu(entity : Entity) {
@@ -154,7 +154,7 @@ class HierarchyPanel {
 
   function drawRename(entity : Entity) {
     ImGui.sameLine();
-    ImGui.setNextItemWidth(Math.max(togglesAt - ImGui.getCursorPosX(), 40));
+    ImGui.setNextItemWidth(-1);
     if (renameFocus) {
       ImGui.setKeyboardFocusHere();
       renameFocus = false;
@@ -172,24 +172,17 @@ class HierarchyPanel {
 
   function drawToggles(entity : Entity) {
     ImGui.pushStyleVar(ImGuiStyleVar.FramePadding, {x: 0, y: 0});
-    ImGui.sameLine(togglesAt);
+    ImGui.setCursorPosX(rowStart);
     var seen = !entity.hiddenInEditor;
     if (ImGui.checkbox('##editor-${entity.id}', seen)) {
       entity.hiddenInEditor = !seen;
       editor.document.rememberFlags();
     }
     if (ImGui.isItemHovered()) ImGui.setTooltip(EDITOR_TIP);
-    ImGui.sameLine(togglesAt + toggleStep);
+    ImGui.sameLine(rowStart + toggleStep);
     var inGame = entity.active;
     if (ImGui.checkbox('##game-${entity.id}', inGame)) editor.commands.execute(new SetActiveCommand(entity, inGame));
     if (ImGui.isItemHovered()) ImGui.setTooltip(GAME_TIP);
-    ImGui.sameLine(togglesAt + toggleStep * 2);
-    var locked = entity.lockedInEditor;
-    if (ImGui.checkbox('##lock-${entity.id}', locked)) {
-      entity.lockedInEditor = locked;
-      editor.document.rememberFlags();
-    }
-    if (ImGui.isItemHovered()) ImGui.setTooltip(LOCK_TIP);
     ImGui.popStyleVar();
   }
 

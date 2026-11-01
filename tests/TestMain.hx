@@ -11,6 +11,7 @@ import scene.data.SceneFormat;
 import scene.data.SceneSchema;
 import scene.editor.CommandStack;
 import scene.editor.GizmoMath;
+import scene.editor.LockGroups;
 import scene.editor.Selection;
 import scene.editor.Validator;
 import scene.editor.Vec3;
@@ -586,6 +587,52 @@ class TestMain {
     scene.attach(detached);
   }
 
+  static function testLockGroups() {
+    var scene = sample();
+    var a = scene.find("aaaaaaaaaaaaaaaa"), b = scene.find("bbbbbbbbbbbbbbbb");
+    var c = scene.createEntity("Üçüncü", "cccccccccccccccc");
+    var d = scene.createEntity("Dördüncü", "dddddddddddddddd");
+    var groups = new LockGroups();
+    var selection = new Selection();
+    selection.expand = list -> groups.expand(list, scene);
+
+    check(!groups.isLocked([a, c]), "kilitsiz");
+    groups.lock([a]);
+    check(groups.groupOf(a) == null, "tek nesne kilitlenmez");
+    groups.lock([a, c]);
+    check(groups.isLocked([a, c]), "kilitli");
+    check(!groups.isLocked([a, d]), "gruptan olmayan nesne");
+    selection.set([a]);
+    equals(selection.items.length, 2, "kilitli nesne grubuyla seçilmeli");
+    selection.toggle(c);
+    equals(selection.items.length, 0, "grup birlikte bırakılmalı");
+    selection.add(c);
+    equals(selection.items.length, 2, "grup birlikte eklenmeli");
+    selection.set([d]);
+    selection.toggle(a);
+    equals(selection.items.length, 3, "grup seçime eklenmeli");
+
+    groups.lock([a, d]);
+    check(groups.groupOf(c) == null, "yeni kilit eski grubu çözmeli");
+    equals(groups.toIds().length, 1, "tek grup kalmalı");
+
+    var detached = scene.detach(d);
+    selection.set([a]);
+    equals(selection.items.length, 1, "silinen üye seçilmemeli");
+    scene.attach(detached);
+    selection.set([a]);
+    equals(selection.items.length, 2, "geri alınan üye gruba dönmeli");
+
+    var saved = groups.toIds();
+    groups.unlock([a]);
+    check(!groups.isLocked([a, d]), "kilit açılmalı");
+    groups.load(saved, scene);
+    check(groups.isLocked([a, d]), "kilit kayıttan dönmeli");
+    groups.load([["aaaaaaaaaaaaaaaa", "ffffffffffffffff"]], scene);
+    check(groups.groupOf(a) == null, "tek üye kalan grup yüklenmemeli");
+    keep(b);
+  }
+
   static function testGizmoMath() {
     var origin = new Vec3();
     near(GizmoMath.axisParam(new Vec3(5, 0, 10), new Vec3(0, 0, -1), origin, new Vec3(1, 0, 0)), 5, "eksen konumu");
@@ -685,6 +732,7 @@ class TestMain {
     testVisibility();
     testBrokenComponent();
     testSelection();
+    testLockGroups();
     testGizmoMath();
     testValidator();
     testPlayOptions();
