@@ -30,9 +30,11 @@ class Validator {
     for (entity in scene.entities)
       for (component in entity.components)
         for (field in component.describeFields()) {
-          var value : String = field.hint == HNone || field.hint == null ? "" : component.readField(field.name);
+          var isFile = field.hint == HAsset || field.hint == HPrefab;
+          if (!isFile && field.hint != HEntity) continue;
+          var value : String = component.readField(field.name);
           if (value == null || value == "") continue;
-          if (field.hint == HAsset && !assetExists(value))
+          if (isFile && !assetExists(value))
             issues.push({entity: entity, message: '${entity.name}: eksik asset "$value" (${field.label})'});
           if (field.hint == HEntity && scene.find(value) == null)
             issues.push({entity: entity, message: '${entity.name}: kırık referans ${field.label} ($value)'});

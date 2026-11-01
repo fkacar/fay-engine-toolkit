@@ -52,12 +52,14 @@ class Viewport {
   var grabPoint : Null<Vec3>;
   var grabLimit = 0.;
   var sideways = 0.;
+  var overlay : WorldOverlay;
 
   public function new(editor : Editor, view : h3d.Camera) {
     this.editor = editor;
     this.view = view;
     camera = new EditorCamera(view);
     gizmo = new Gizmo(view);
+    overlay = new WorldOverlay(view);
   }
 
   public function update(dt : Float) {
@@ -66,13 +68,18 @@ class Viewport {
     var ray = view.rayFromScreen(mouse.x, mouse.y);
 
     readInput(mouse.x, mouse.y, ray, dt);
-    trace(mouse.x, mouse.y);
+    recordInput(mouse.x, mouse.y);
     camera.update(dt);
     dropAsset(ray);
 
     var roots = editor.canEdit() ? editor.selection.roots() : [];
     gizmo.layout(roots, mouse.x, mouse.y, mode == Idle && isHovered(), density);
     var list = ImGui.getBackgroundDrawList();
+    overlay.begin(list, camera.forward(), density);
+    for (entity in editor.scene.entities) {
+      if (!entity.isShown()) continue;
+      for (component in entity.components) component.drawOverlay(overlay, editor.selection.has(entity));
+    }
     for (entity in editor.selection.items) drawOutline(list, entity, density);
     gizmo.draw(list, density);
     if (mode == BoxSelecting) drawBox(list, mouse.x, mouse.y);
@@ -85,7 +92,7 @@ class Viewport {
   }
 
   // Kameranın bozulduğu anı yakalamak için: tasarımcı kaydı dosyaya yazıp sorunla gönderir.
-  function trace(x : Float, y : Float) {
+  function recordInput(x : Float, y : Float) {
     var io = ImGui.getIO();
     var keys = (editor.isCommandHeld() ? "cmd " : "") + (Key.isDown(Key.ALT) ? "alt " : "") + (Key.isDown(Key.SHIFT) ? "shift " : "");
     var buttons = (ImGui.isMouseDown(LEFT) ? "sol " : "") + (ImGui.isMouseDown(RIGHT) ? "sag " : "") + (ImGui.isMouseDown(MIDDLE) ? "orta " : "");

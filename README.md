@@ -47,16 +47,64 @@ class HouseComponent extends Component {
 }
 ```
 
-Bileşen `ComponentRegistry.register` ile kaydedilir. Alan tipi açıkça `Float`, `Int`, `Bool` veya `String` olmalıdır.
+Bileşen `ComponentRegistry.register` ile kaydedilir. Alan tipi açıkça `Float`, `Int`, `Bool`, `String`, `Array<String>` veya `Array<Float>` olmalıdır.
 
 Metin alanının anlamı işaretlenirse Inspector uygun girişi gösterir, kayıt doğrulaması da bakar:
 
 ```haxe
 @:editable("Model") @:asset public var path : String = "";     // Asset Browser'dan sürüklenir, dosya aranır
 @:editable("Hedef") @:entity public var target : String = "";  // Listeden seçilir, nesne aranır
+@:editable("Parça") @:prefab public var part : String = "";     // Prefab listesinden seçilir, dosya aranır
+@:editable("Tür") @:choice("kolay", "zor") public var kind : String = "kolay";  // Açılır liste
+@:editable("Renk") @:color public var tint : Int = 0xFF8000;    // Renk seçici
 ```
 
 Görseli `entity.object` altında olmayan bileşen (sahne köküne bağlı birim gibi) `visuals()` döndürür. Seçim ve gizleme bu görselleri de kapsar.
+
+Oyunda görünmeyen şekiller `drawOverlay(overlay, selected)` içinde çizilir. Hazır biçimler `OverlayShapes` içindedir.
+
+## İşaretçi yazmak
+
+İşaretçi, oyunda görünmeyen ve editörde tıklanabilen bir bileşendir. `Marker`'dan türer, `ComponentRegistry` ile kaydedilir, `Düzen > İşaretçi ekle` menüsüne kendiliğinden girer:
+
+```haxe
+@:component("camp")
+class CampMarker extends Marker {
+  @:editable("Yarıçap", 1, 100) public var radius : Float = 8;
+
+  override public function color() : Int {
+    return 0xE08040;
+  }
+
+  override public function title() : String {
+    return "Kamp";
+  }
+
+  override function drawShape(overlay : Overlay, tint : Int, at : h3d.Vector) {
+    OverlayShapes.circle(overlay, flatFrame(at), radius, 0, tint);
+  }
+
+  override function onStart() {
+    // Oyun başlarken çalışır. Editörde çalışmaz.
+  }
+}
+```
+
+Rota için `RouteMarker`'dan türeyin ve `WaypointMarker`'ı da kaydedin. Noktalar alt nesnedir, `waypoints()` sırayla verir. `collider` bileşeni için `ColliderComponent` kaydedilir.
+
+Zeminin yüksekliğini bilen oyun `level.provide(GroundHeight, terrain)` çağırır, işaretçiler zemine oturur ve `z` zeminden yükseklik olur. Verilmezse `z` olduğu gibi kullanılır.
+
+## Prefab
+
+Prefab dosyası `res/prefabs/ad.prefab.json`, tek köklü küçük bir sahnedir. Sahne yalnızca kök satırını tutar: `prefab` yolu ve `overrides` listesi. Alt nesneler yüklenirken açılır, kimlikleri `kök/parça` biçimindedir. Farklar elle izlenmez, kayıtta prefab'la karşılaştırılarak bulunur.
+
+Oyun, sahneyi yüklemeden önce dosya okuyucuyu verir:
+
+```haxe
+level.prefabLoader = path -> hxd.Res.load(path).toText();
+```
+
+Derleme kontrolü için `common.hxml` içine `--macro scene.macro.SceneCheck.run("res/prefabs")` eklenir. Eksik prefab dosyası, iki köklü prefab ve artık kodda olmayan bir alanı gösteren fark derlemeyi durdurur. Editörde bozuk prefab sahneyi düşürmez, kök nesne yolu ve farklarıyla korunur.
 
 ## Yeniden adlandırma
 
@@ -83,6 +131,8 @@ Bir bileşen veya alan bilerek silindiyse sahne dosyası da güncellenir.
 ## Sahne dosyası
 
 JSON'dur ve deterministik yazılır: aynı sahne her sistemde aynı dosyayı üretir. Sayılar 5 ondalığa yuvarlanır, dönüşler derecedir, alanlar alfabetik sıralıdır. Bu derlemede tanınmayan bileşen ve alanlar silinmez, olduğu gibi geri yazılır.
+
+Prefab kopyasının satırında `prefab` ve `overrides` bulunur, kopya olmayan nesnelerde bu alanlar yazılmaz.
 
 Biçim değişirse `SceneFormat.VERSION` artırılır ve `MIGRATIONS` listesine yükseltme eklenir.
 

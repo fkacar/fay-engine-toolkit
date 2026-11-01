@@ -49,6 +49,9 @@ class Component {
     return [];
   }
 
+  // Editörde her karede çağrılır: görünmeyen şekiller, sınırlar ve rotalar burada çizilir.
+  public function drawOverlay(overlay : scene.Overlay, selected : Bool) {}
+
   // Editörde bir alan değişince görsel yeniden kurulur.
   public function refresh() {
     entity.scene.destroyComponent(this);

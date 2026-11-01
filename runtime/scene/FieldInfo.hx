@@ -5,6 +5,8 @@ enum FieldKind {
   KInt;
   KBool;
   KString;
+  KStringList;
+  KFloatList;
 }
 
 // Metin alanının anlamı: Inspector uygun girişi gösterir, kayıt doğrulaması buna bakar.
@@ -12,6 +14,9 @@ enum FieldHint {
   HNone;
   HAsset;
   HEntity;
+  HPrefab;
+  HColor;
+  HChoice(options : Array<String>);
 }
 
 typedef FieldInfo = {

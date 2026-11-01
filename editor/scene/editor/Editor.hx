@@ -6,6 +6,7 @@ import imgui.ImGui;
 import imgui.types.ImFontAtlas.ImFontTexData;
 import scene.FocusGuard;
 import scene.HiDpi;
+import scene.Marker;
 import scene.PlayOptions;
 import scene.editor.panels.AssetBrowser;
 import scene.editor.panels.HierarchyPanel;
@@ -32,6 +33,7 @@ class Editor {
   static inline var DIRTY_POPUP = "Kaydedilmemiş değişiklik";
   static inline var SAVE_AS_POPUP = "Farklı kaydet";
   static inline var RECOVERY_POPUP = "Otomatik yedek";
+  static inline var PREFAB_POPUP = "Prefab yap";
   static inline var DOCK_SPACE_NODE = 1 << 10;
   static inline var NOTICE_SECONDS = 2.5;
   static inline var NOTICE_MARGIN = 12;
@@ -78,6 +80,8 @@ class Editor {
   var openDirtyPopup = false;
   var openSaveAsPopup = false;
   var saveAsName = "";
+  var openPrefabPopup = false;
+  var prefabName = "";
 
   public function new(scene : SceneInstance, path : String) {
     this.scene = scene;
@@ -95,6 +99,7 @@ class Editor {
     selection.expand = entities -> groups.expand(entities, scene);
     validator = new Validator(assetExists);
     document = new SceneDocument(this, scene, path);
+    validator.rules.push(_ -> document.prefabRootIssues());
     if (document.prefs.layoutVersion != LAYOUT_VERSION) layoutPending = true;
     actions = new SceneActions(this);
     viewport = new Viewport(this, scene.root.getScene().camera);
@@ -102,6 +107,7 @@ class Editor {
     inspector = new InspectorPanel(this);
     assets = new AssetBrowser(this);
     document.validate();
+    for (type in document.prefs.hiddenMarkers) Marker.hiddenTypes.set(type, true);
 
     addPanel(HIERARCHY, hierarchy.draw);
     addPanel(INSPECTOR, inspector.draw);
@@ -170,6 +176,12 @@ class Editor {
     else groups.lock(items);
     document.rememberFlags();
     show(locked ? "Kilit açıldı" : '${items.length} nesne kilitlendi');
+  }
+
+  public function askPrefabName() {
+    var entity = selection.primary;
+    prefabName = entity == null ? "" : SceneDocument.cleanName(entity.name);
+    openPrefabPopup = true;
   }
 
   public function requestOpen(path : String) {
@@ -267,6 +279,11 @@ class Editor {
       if (ImGui.menuItem("Sil", "Del")) actions.remove();
       ImGui.separator();
       if (ImGui.menuItem("Boş nesne ekle")) actions.createEmpty();
+      if (ImGui.beginMenu("İşaretçi ekle")) {
+        for (marker in actions.placeableMarkers()) if (ImGui.menuItem(marker.title())) actions.addMarker(marker.componentId());
+        ImGui.endMenu();
+      }
+      if (ImGui.menuItem("Prefab yap", null, false, selection.items.length == 1)) askPrefabName();
       if (ImGui.menuItem("Zemine yapıştır", "End")) actions.snapToGround();
       if (ImGui.menuItem("Seçilene odaklan", "F")) actions.focus();
       ImGui.endMenu();
@@ -274,6 +291,10 @@ class Editor {
     if (ImGui.beginMenu("Görünüm")) {
       if (ImGui.menuItem("Editörde gizlenenleri göster")) document.showAll();
       if (ImGui.menuItem("Panel düzenini sıfırla")) layoutPending = true;
+      if (ImGui.beginMenu("İşaretçiler")) {
+        for (marker in actions.placeableMarkers()) drawMarkerFilter(marker.componentId(), marker.title());
+        ImGui.endMenu();
+      }
       ImGui.endMenu();
     }
     if (ImGui.beginMenu("Oyun")) {
@@ -291,6 +312,20 @@ class Editor {
     if (warnings > 0) ImGui.textColored(WARNING_COLOR, 'Uyarı: $warnings');
     if (session.isRunning) ImGui.textColored(SUCCESS_COLOR, "Oyun açık");
     ImGui.endMainMenuBar();
+  }
+
+  function drawMarkerFilter(type : String, title : String) {
+    var shown = !Marker.hiddenTypes.exists(type);
+    if (!ImGui.menuItem(title, null, shown)) return;
+    // menuItem verilen değeri kendisi çevirir, durum Map'ten okunur.
+    if (Marker.hiddenTypes.exists(type)) Marker.hiddenTypes.remove(type);
+    else Marker.hiddenTypes.set(type, true);
+    for (entity in scene.entities)
+      for (component in entity.components) {
+        var marker = Std.downcast(component, Marker);
+        if (marker != null) marker.applyFilter();
+      }
+    document.prefs.setHiddenMarkers([for (hidden in Marker.hiddenTypes.keys()) hidden]);
   }
 
   function drawFileMenu() {
@@ -329,9 +364,11 @@ class Editor {
   function drawPopups() {
     if (openDirtyPopup) ImGui.openPopup(DIRTY_POPUP);
     if (openSaveAsPopup) ImGui.openPopup(SAVE_AS_POPUP);
+    if (openPrefabPopup) ImGui.openPopup(PREFAB_POPUP);
     if (document.hasRecovery && !ImGui.isPopupOpen(RECOVERY_POPUP)) ImGui.openPopup(RECOVERY_POPUP);
     openDirtyPopup = false;
     openSaveAsPopup = false;
+    openPrefabPopup = false;
     var flags = ImGuiWindowFlags.AlwaysAutoResize;
 
     if (ImGui.beginPopupModal(DIRTY_POPUP, null, flags)) {
@@ -352,6 +389,16 @@ class Editor {
       var name = saveAsName;
       if (ImGui.inputText("Sahne adı", name)) saveAsName = name;
       if (ImGui.button("Kaydet") && document.saveAs(saveAsName)) ImGui.closeCurrentPopup();
+      ImGui.sameLine();
+      if (ImGui.button("Vazgeç")) ImGui.closeCurrentPopup();
+      ImGui.endPopup();
+    }
+
+    if (ImGui.beginPopupModal(PREFAB_POPUP, null, flags)) {
+      if (ImGui.isWindowAppearing()) ImGui.setKeyboardFocusHere();
+      var name = prefabName;
+      if (ImGui.inputText("Prefab adı", name)) prefabName = name;
+      if (ImGui.button("Oluştur") && actions.makePrefab(prefabName)) ImGui.closeCurrentPopup();
       ImGui.sameLine();
       if (ImGui.button("Vazgeç")) ImGui.closeCurrentPopup();
       ImGui.endPopup();

@@ -11,7 +11,7 @@ private typedef Editable = {
   var kind : String;
   var min : Null<Float>;
   var max : Null<Float>;
-  var hint : String;
+  var hint : Expr;
   var former : Array<String>;
 }
 
@@ -24,6 +24,10 @@ private typedef Editable = {
 //   @:editable @:formerly("h") var height : Float = 4;
 //   @:editable("Model") @:asset var path : String = "";
 //   @:editable("Hedef") @:entity var target : String = "";
+//   @:editable("Parça") @:prefab var part : String = "";
+//   @:editable("Tür") @:choice("kolay", "zor") var kind : String = "kolay";
+//   @:editable("Renk") @:color var tint : Int = 0xFF8000;
+//   @:editable("Etiketler") var tags : Array<String> = [];
 class ComponentMacro {
   public static function build() : Array<Field> {
     var fields = Context.getBuildFields();
@@ -42,7 +46,7 @@ class ComponentMacro {
       kind: $p{["scene", "FieldInfo", "FieldKind", item.kind]},
       min: $v{item.min},
       max: $v{item.max},
-      hint: $p{["scene", "FieldInfo", "FieldHint", item.hint]},
+      hint: ${item.hint},
     })];
     var reads = [for (item in editable) {
       var name = item.name;
@@ -51,7 +55,12 @@ class ComponentMacro {
     var writes = [for (item in editable) {
       var name = item.name;
       var names = [name].concat(item.former);
-      {values: [for (entry in names) macro $v{entry}], expr: macro { this.$name = value; return true; }};
+      var assign = switch (item.kind) {
+        case "KStringList": macro { var list : Array<Dynamic> = value; this.$name = [for (entry in list) (entry : String)]; };
+        case "KFloatList": macro { var list : Array<Dynamic> = value; this.$name = [for (entry in list) (entry : Float)]; };
+        default: macro this.$name = value;
+      };
+      {values: [for (entry in names) macro $v{entry}], expr: macro { $assign; return true; }};
     }];
 
     fields.push(method("describeFields", [], macro : Array<scene.FieldInfo>, macro {
@@ -95,10 +104,16 @@ class ComponentMacro {
     };
   }
 
-  static function hintOf(field : Field) : String {
-    if (Lambda.exists(field.meta, entry -> entry.name == ":asset")) return "HAsset";
-    if (Lambda.exists(field.meta, entry -> entry.name == ":entity")) return "HEntity";
-    return "HNone";
+  static function hintOf(field : Field) : Expr {
+    var choice = Lambda.find(field.meta, entry -> entry.name == ":choice");
+    if (choice != null) {
+      var options = strings([choice]);
+      return macro scene.FieldInfo.FieldHint.HChoice($v{options});
+    }
+    var name = "HNone";
+    for (hint in [":asset" => "HAsset", ":entity" => "HEntity", ":prefab" => "HPrefab", ":color" => "HColor"].keyValueIterator())
+      if (Lambda.exists(field.meta, entry -> entry.name == hint.key)) name = hint.value;
+    return macro $p{["scene", "FieldInfo", "FieldHint", name]};
   }
 
   static function kindOf(field : Field) : String {
@@ -111,8 +126,10 @@ class ComponentMacro {
       case TPath({name: "Int", params: []}): return "KInt";
       case TPath({name: "Bool", params: []}): return "KBool";
       case TPath({name: "String", params: []}): return "KString";
+      case TPath({name: "Array", params: [TPType(TPath({name: "String", params: []}))]}): return "KStringList";
+      case TPath({name: "Array", params: [TPType(TPath({name: "Float", params: []}))]}): return "KFloatList";
       default:
-        return Context.error('@:editable alan ${field.name}: tip açıkça Float, Int, Bool veya String olmalı', field.pos);
+        return Context.error('@:editable alan ${field.name}: tip açıkça Float, Int, Bool, String, Array<String> veya Array<Float> olmalı', field.pos);
     }
   }
 

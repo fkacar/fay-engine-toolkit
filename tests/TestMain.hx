@@ -6,6 +6,8 @@ import scene.FieldInfo.FieldKind;
 import scene.Guid;
 import scene.PlayOptions;
 import scene.SceneInstance;
+import scene.Entity;
+import scene.data.Prefabs;
 import scene.data.SceneData;
 import scene.data.SceneFormat;
 import scene.data.SceneSchema;
@@ -25,6 +27,7 @@ import scene.editor.commands.SetFieldCommand;
 import scene.editor.commands.SetNameCommand;
 import scene.editor.commands.SetParentCommand;
 import scene.editor.commands.SetTransformCommand;
+import scene.editor.commands.SyncPrefabsCommand;
 
 @:component("crate")
 class Crate extends Component {
@@ -71,6 +74,10 @@ class Barrel extends Component {
 class Pointer extends Component {
   @:editable("Model") @:asset public var model : String = "";
   @:editable("Hedef") @:entity public var target : String = "";
+  @:editable("Zorluk") @:choice("kolay", "zor") public var level : String = "kolay";
+  @:editable("Renk") @:color public var tint : Int = 0xFF8000;
+  @:editable("Etiketler") public var tags : Array<String> = [];
+  @:editable("Hızlar") public var speeds : Array<Float> = [];
 }
 
 // Bozuk asset gibi davranır: kurulumda hata verir.
@@ -633,6 +640,331 @@ class TestMain {
     keep(b);
   }
 
+  // Köy prefab'ı: kök, bir alt nesne ve bir ev. İç prefab Ek kutusu tek seviye iç içedir.
+  static function prefabFiles() {
+    var inner = new SceneData(SceneFormat.VERSION);
+    var lamp = new EntityData("l0", "Lamba kökü");
+    inner.entities.push(lamp);
+    var light = new EntityData("l1", "Işık");
+    light.parent = "l0";
+    light.position = [0, 0, 3];
+    inner.entities.push(light);
+
+    var village = new SceneData(SceneFormat.VERSION);
+    var root = new EntityData("r", "Köy");
+    var rootCrate = new ComponentData("crate");
+    rootCrate.fields.set("tag", "kök");
+    root.components.push(rootCrate);
+    village.entities.push(root);
+    var house = new EntityData("h", "Ev");
+    house.parent = "r";
+    house.position = [2, 3, 0];
+    var crate = new ComponentData("crate");
+    crate.fields.set("width", 5);
+    house.components.push(crate);
+    village.entities.push(house);
+    var nested = new EntityData("n", "Lamba");
+    nested.parent = "r";
+    nested.prefab = "lamp.prefab.json";
+    village.entities.push(nested);
+    return ["village.prefab.json" => SceneFormat.write(village), "lamp.prefab.json" => SceneFormat.write(inner)];
+  }
+
+  static function prefabScene(files : Map<String, String>, ?mode : scene.SceneMode) {
+    var scene = newScene(mode);
+    scene.prefabLoader = path -> {
+      if (!files.exists(path)) throw 'dosya yok: $path';
+      return files.get(path);
+    };
+    return scene;
+  }
+
+  static function instanceData(id : String, x : Float) {
+    var item = new EntityData(id, "Köy " + id);
+    item.prefab = "village.prefab.json";
+    item.position = [x, 0, 0];
+    var data = new SceneData(SceneFormat.VERSION);
+    data.entities.push(item);
+    return data;
+  }
+
+  static function testPrefabs() {
+    var files = prefabFiles();
+    var scene = prefabScene(files);
+    scene.load(instanceData("i", 10));
+
+    equals(scene.entities.length, 4, "instance tüm nesneleri açmalı");
+    var root = scene.find("i"), house = scene.find("i/h");
+    equals(root.prefab, "village.prefab.json", "kök yol taşımalı");
+    equals(root.x, 10, "kök konumu instance'tan gelmeli");
+    equals(root.name, "Köy i", "kök adı instance'tan gelmeli");
+    equals(root.getComponent(Crate).tag, "kök", "kök bileşeni prefab'dan gelmeli");
+    equals(house.parent, root, "alt nesne köke bağlanmalı");
+    equals(house.x, 2, "alt nesne prefab konumunu almalı");
+    equals(house.getComponent(Crate).width, 5, "bileşen alanı prefab'dan gelmeli");
+    check(house.isPrefabPart && !root.isPrefabPart, "parça ayrımı");
+    equals(house.instanceRoot, root, "parça köküne bağlı");
+    equals(scene.find("i/n/l1").z, 3, "iç prefab tek seviye açılmalı");
+    equals(scene.find("i/n/l1").parent, scene.find("i/n"), "iç prefab bağı");
+
+    // Dosyaya yalnızca kök satırı yazılır
+    var data = scene.toData();
+    equals(data.entities.length, 1, "alt nesneler dosyaya yazılmamalı");
+    equals(data.entities[0].components.length, 0, "bileşen prefab'da kalmalı");
+    equals(data.entities[0].overrides.length, 0, "fark yok");
+    var text = SceneFormat.write(data);
+    equals(SceneFormat.write(SceneFormat.read(text)), text, "okuyup yazmak aynı dosyayı üretmeli");
+
+    // Her düzenleme kendiliğinden fark olur
+    house.setPosition(7, 3, 0);
+    house.getComponent(Crate).width = 9;
+    house.name = "Değişik";
+    var changes = scene.overridesOf(root);
+    equals(changes.length, 3, 'üç fark: ${[for (c in changes) c.field]}');
+    equals(changes[0].target, "h", "hedef göreli kimlik");
+    equals(changes[0].field, "component:crate:width", "alan sırası sabit");
+
+    // Diske gidip gelince farklar kalır, yeniden hesap aynı dosyayı üretir
+    var edited = SceneFormat.write(scene.toData());
+    var reloaded = prefabScene(files);
+    reloaded.load(SceneFormat.read(edited));
+    equals(reloaded.find("i/h").x, 7, "konum farkı dönmeli");
+    equals(reloaded.find("i/h").getComponent(Crate).width, 9, "alan farkı dönmeli");
+    equals(reloaded.find("i/h").name, "Değişik", "ad farkı dönmeli");
+    equals(SceneFormat.write(reloaded.toData()), edited, "fark kayıtta kararlı olmalı");
+    house.setPosition(2, 3, 0);
+    equals(scene.overridesOf(root).length, 2, "prefab değerine dönen alan fark olmamalı");
+
+    // Prefab güncellenince fark olmayan alan güncellenir, fark olan kalır
+    var prefab = SceneFormat.read(files.get("village.prefab.json"));
+    prefab.entities[1].position = [20, 30, 0];
+    var crate : ComponentData = prefab.entities[1].components[0];
+    crate.fields.set("count", 42);
+    crate.fields.set("width", 6);
+    files.set("village.prefab.json", SceneFormat.write(prefab));
+    scene.load(scene.toData());
+    house = scene.find("i/h");
+    equals(house.x, 20, "fark olmayan konum güncellenmeli");
+    equals(house.getComponent(Crate).count, 42, "fark olmayan alan güncellenmeli");
+    equals(house.getComponent(Crate).width, 9, "fark olan alan kalmalı");
+
+    // Uygula: farklar prefab'a geçer, instance temizlenir
+    root = scene.find("i");
+    var changesNow = scene.overridesOf(root);
+    var target = SceneFormat.read(files.get("village.prefab.json"));
+    Prefabs.applyToPrefab(target, changesNow);
+    files.set("village.prefab.json", SceneFormat.write(target));
+    var after = scene.toData();
+    after.entities[0].overrides = [];
+    scene.load(after);
+    equals(scene.find("i/h").getComponent(Crate).width, 9, "uygulanan değer prefab'dan gelmeli");
+    equals(scene.overridesOf(scene.find("i")).length, 0, "uygulamadan sonra fark kalmamalı");
+
+    // İç prefab farkı
+    scene.find("i/n/l1").setPosition(0, 0, 8);
+    var nestedChanges = scene.overridesOf(scene.find("i"));
+    equals(nestedChanges.length, 1, "iç prefab farkı");
+    equals(nestedChanges[0].target, "n/l1", "iç hedef yolu");
+    var written = SceneFormat.write(scene.toData());
+    var again = prefabScene(files);
+    again.load(SceneFormat.read(written));
+    equals(again.find("i/n/l1").z, 8, "iç prefab farkı dönmeli");
+    var outer = SceneFormat.read(files.get("village.prefab.json"));
+    Prefabs.applyToPrefab(outer, nestedChanges);
+    var lampItem = Lambda.find(outer.entities, item -> item.id == "n");
+    equals(lampItem.overrides.length, 1, "iç hedef instance farkına yazılmalı");
+    equals(lampItem.overrides[0].target, "l1", "yol kısalmalı");
+
+    // Aynı prefab iki kez
+    var two = instanceData("a", 0);
+    two.entities.push(instanceData("b", 50).entities[0]);
+    var both = prefabScene(files);
+    both.load(two);
+    equals(both.entities.length, 8, "iki instance");
+    both.find("a/h").setPosition(1, 1, 1);
+    equals(both.overridesOf(both.find("b")).length, 0, "fark diğer instance'a geçmemeli");
+
+    // Silme ve geri alma
+    var stack = new CommandStack();
+    var before = SceneFormat.write(both.toData());
+    stack.execute(new RemoveEntitiesCommand(both, [both.find("a")]));
+    equals(both.entities.length, 4, "instance parçalarıyla silinmeli");
+    stack.undo();
+    equals(SceneFormat.write(both.toData()), before, "silme geri alınınca dosya aynı");
+
+    var add = new AddEntitiesCommand(both, instanceData("c", 90).entities, "Prefab ekle");
+    stack.execute(add);
+    equals(both.entities.length, 12, "ekleme");
+    stack.undo();
+    equals(both.entities.length, 8, "ekleme geri alınmalı");
+    stack.redo();
+    equals(both.find("c/h").parent, both.find("c"), "yineleme aynı nesneleri koymalı");
+
+    // Kopya: kök seçilirse yalnızca kök satırı, parça seçilirse bağımsız nesne
+    equals(both.toDataOf([both.find("a")]).entities.length, 1, "instance kopyası tek satır");
+    var part = both.toDataOf([both.find("a/h")]);
+    equals(part.entities.length, 1, "parça kopyası");
+    equals(part.entities[0].prefab, null, "parça kopyası bağımsız");
+    equals(part.entities[0].components.length, 1, "parça kopyası bileşen taşımalı");
+  }
+
+  static function applyFile(files : Map<String, String>, scene : SceneInstance, root : Entity) {
+    var path = "village.prefab.json";
+    var prefab = SceneFormat.read(files.get(path));
+    Prefabs.applyToPrefab(prefab, scene.overridesOf(root));
+    return {path: path, before: files.get(path), after: SceneFormat.write(prefab), write: text -> files.set(path, text)};
+  }
+
+  // Uygula ve Farkları sil normal birer undo adımıdır, önceki adımlar da çalışmaya devam eder.
+  static function testPrefabUndo() {
+    var files = prefabFiles();
+    var two = instanceData("a", 0);
+    two.entities.push(instanceData("b", 50).entities[0]);
+    var scene = prefabScene(files);
+    scene.load(two);
+    var stack = new CommandStack();
+    var root = scene.find("a"), house = scene.find("a/h"), other = scene.find("b/h");
+    var crate = house.getComponent(Crate), otherCrate = other.getComponent(Crate);
+    var original = files.get("village.prefab.json");
+
+    stack.execute(new SetNameCommand(other, other.name, "Diğer"));
+    stack.execute(new SetFieldCommand(crate, "width", 5, 9, "Genişlik"));
+
+    stack.execute(new SyncPrefabsCommand("Prefab'a uygula", scene, root, applyFile(files, scene, root)));
+    equals(scene.find("a/h"), house, "uygulama nesneyi yeniden kurmamalı");
+    equals(house.getComponent(Crate), crate, "uygulama bileşeni yeniden kurmamalı");
+    equals(otherCrate.width, 9, "diğer kopya güncellenmeli");
+    equals(other.name, "Diğer", "diğer kopyanın farkı kalmalı");
+    equals(scene.overridesOf(root).length, 0, "uygulanan kopyada fark kalmamalı");
+    equals(scene.overridesOf(scene.find("b")).length, 1, "diğer kopyanın farkı hâlâ fark");
+    check(files.get("village.prefab.json") != original, "dosya değişmeli");
+
+    stack.undo();
+    equals(files.get("village.prefab.json"), original, "geri alınca dosya aynı");
+    equals(crate.width, 9, "değer fark olarak dönmeli");
+    equals(scene.overridesOf(root).length, 1, "fark geri gelmeli");
+    equals(otherCrate.width, 5, "diğer kopya eski değerine dönmeli");
+    equals(other.name, "Diğer", "diğer kopyanın adı değişmemeli");
+
+    stack.undo();
+    equals(crate.width, 5, "önceki alan komutu çalışmalı");
+    stack.undo();
+    equals(other.name, "Ev", "önceki ad komutu çalışmalı");
+
+    stack.redo();
+    stack.redo();
+    stack.redo();
+    equals(otherCrate.width, 9, "yineleme dosyayı da uygulamalı");
+    equals(scene.overridesOf(root).length, 0, "yinelemede fark yok");
+    stack.undo();
+
+    stack.execute(new SyncPrefabsCommand("Farkları sil", scene, root));
+    equals(crate.width, 5, "fark silinmeli");
+    equals(scene.find("a/h"), house, "fark silmek nesneyi yeniden kurmamalı");
+    equals(scene.overridesOf(root).length, 0, "fark kalmamalı");
+    stack.undo();
+    equals(crate.width, 9, "silinen fark geri gelmeli");
+    equals(scene.overridesOf(root).length, 1, "fark yeniden sayılmalı");
+
+    // Konum ve ad da yerinde döner
+    house.setPosition(40, 3, 0);
+    house.name = "Taşındı";
+    stack.execute(new SyncPrefabsCommand("Farkları sil", scene, root));
+    equals(house.x, 2, "konum prefab'a dönmeli");
+    equals(house.name, "Ev", "ad prefab'a dönmeli");
+    stack.undo();
+    equals(house.x, 40, "konum geri gelmeli");
+    equals(house.name, "Taşındı", "ad geri gelmeli");
+  }
+
+  static function testPrefabFailures() {
+    var files = prefabFiles();
+
+    // Eksik dosya: sahne düşmez, instance kaybolmaz
+    var data = instanceData("x", 4);
+    data.entities[0].prefab = "yok.prefab.json";
+    data.entities[0].overrides.push(new scene.data.SceneData.OverrideData("h", "name", "Kalsın"));
+    var text = SceneFormat.write(data);
+    var scene = prefabScene(files);
+    scene.load(SceneFormat.read(text));
+    equals(scene.warnings.length, 1, "eksik prefab uyarı vermeli");
+    equals(scene.entities.length, 1, "kök kalmalı");
+    equals(SceneFormat.write(scene.toData()), text, "yol ve farklar kaybolmamalı");
+
+    var failed = false;
+    try prefabScene(files, Game).load(SceneFormat.read(text)) catch (e : Dynamic) failed = true;
+    check(failed, "oyunda eksik prefab gizlenmemeli");
+
+    // Prefab'dan silinen nesnenin farkı düşer, uyarı verir
+    var gone = instanceData("g", 0);
+    gone.entities[0].overrides.push(new scene.data.SceneData.OverrideData("silinmis", "name", "x"));
+    var other = prefabScene(files);
+    other.load(gone);
+    equals(other.warnings.length, 1, "hedefi olmayan fark uyarı vermeli");
+
+    // Kendini içeren prefab sonsuza gitmez
+    var loop = new SceneData(SceneFormat.VERSION);
+    var head = new EntityData("a", "Baş");
+    loop.entities.push(head);
+    var tail = new EntityData("b", "Kuyruk");
+    tail.parent = "a";
+    tail.prefab = "loop.prefab.json";
+    loop.entities.push(tail);
+    files.set("loop.prefab.json", SceneFormat.write(loop));
+    var looped = instanceData("o", 0);
+    looped.entities[0].prefab = "loop.prefab.json";
+    var circular = prefabScene(files);
+    circular.load(looped);
+    check(circular.entities.length <= 3, 'döngü bitmeli: ${circular.entities.length}');
+    equals(circular.warnings.length, 1, "döngü uyarı vermeli");
+
+    // İki köklü dosya
+    var bad = new SceneData(SceneFormat.VERSION);
+    bad.entities.push(new EntityData("p", "Bir"));
+    bad.entities.push(new EntityData("q", "İki"));
+    files.set("iki.prefab.json", SceneFormat.write(bad));
+    var twoRoots = instanceData("t", 0);
+    twoRoots.entities[0].prefab = "iki.prefab.json";
+    var broken = prefabScene(files);
+    broken.load(twoRoots);
+    equals(broken.warnings.length, 1, "iki kök uyarı vermeli");
+
+    // Prefab içi nesne referansı instance kimliğine çevrilir
+    var types = registry();
+    types.register(Pointer);
+    var linked = new SceneData(SceneFormat.VERSION);
+    var base = new EntityData("a", "Kök");
+    var pointer = new ComponentData("pointer");
+    pointer.fields.set("target", "b");
+    base.components.push(pointer);
+    linked.entities.push(base);
+    var goal = new EntityData("b", "Hedef");
+    goal.parent = "a";
+    linked.entities.push(goal);
+    var refs = new SceneInstance(types, Editor, new Object());
+    refs.prefabLoader = _ -> SceneFormat.write(linked);
+    var one = instanceData("i", 0);
+    refs.load(one);
+    equals(refs.find("i").getComponent(Pointer).target, "i/b", "referans yeni kimliği göstermeli");
+    equals(refs.overridesOf(refs.find("i")).length, 0, "referans farkı sayılmamalı");
+  }
+
+  static function testPrefabSchema() {
+    var schema = new SceneSchema();
+    schema.add(["crate"], ["width" => "Float"]);
+    var data = instanceData("i", 0);
+    data.entities[0].overrides.push(new scene.data.SceneData.OverrideData("h", "component:crate:width", 4));
+    equals(schema.check(SceneFormat.write(data), _ -> true).length, 0, "geçerli fark");
+    equals(schema.check(SceneFormat.write(data), _ -> false).length, 1, "eksik prefab dosyası derlemede yakalanmalı");
+    data.entities[0].overrides[0].field = "component:crate:height";
+    equals(schema.check(SceneFormat.write(data), _ -> true).length, 1, "yeniden adlandırılan alan farkta yakalanmalı");
+    data.entities[0].overrides[0].field = "component:eski:width";
+    equals(schema.check(SceneFormat.write(data), _ -> true).length, 1, "yeniden adlandırılan bileşen farkta yakalanmalı");
+    data.entities[0].overrides[0].field = "component:crate:width";
+    data.entities[0].overrides[0].value = "metin";
+    equals(schema.check(SceneFormat.write(data), _ -> true).length, 1, "yanlış tip farkta yakalanmalı");
+  }
+
   static function testGizmoMath() {
     var origin = new Vec3();
     near(GizmoMath.axisParam(new Vec3(5, 0, 10), new Vec3(0, 0, -1), origin, new Vec3(1, 0, 0)), 5, "eksen konumu");
@@ -664,6 +996,19 @@ class TestMain {
     @:privateAccess scene.isReady = true;
     var pointer = entity.addComponent(new Pointer());
     var fields = pointer.describeFields();
+    equals(fields.length, 6, "tüm alanlar");
+    switch (fields[2].hint) {
+      case HChoice(options): equals(options.join(","), "kolay,zor", "seçenekler");
+      default: check(false, "seçim alanı");
+    }
+    equals(fields[3].hint, FieldHint.HColor, "renk alanı");
+    equals(fields[4].kind, FieldKind.KStringList, "metin listesi");
+    equals(fields[5].kind, FieldKind.KFloatList, "sayı listesi");
+    check(pointer.writeField("tags", ["a", "b"]), "liste yazılmalı");
+    equals(pointer.tags.length, 2, "liste okunmalı");
+    equals(pointer.tags[1], "b", "liste değeri");
+    pointer.writeField("speeds", [1.5, 2]);
+    equals(pointer.speeds[0], 1.5, "sayı listesi değeri");
     equals(fields[0].hint, FieldHint.HAsset, "asset alanı");
     equals(fields[1].hint, FieldHint.HEntity, "nesne alanı");
 
@@ -733,6 +1078,10 @@ class TestMain {
     testBrokenComponent();
     testSelection();
     testLockGroups();
+    testPrefabs();
+    testPrefabUndo();
+    testPrefabFailures();
+    testPrefabSchema();
     testGizmoMath();
     testValidator();
     testPlayOptions();

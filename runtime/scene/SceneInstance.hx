@@ -1,6 +1,8 @@
 package scene;
 
+import scene.data.Prefabs;
 import scene.data.SceneData;
+import scene.data.SceneFormat;
 
 // Sahneden ayrılmış alt ağaç. attach aynı nesneleri aynı sıraya geri koyar.
 typedef DetachedEntity = {
@@ -23,7 +25,10 @@ class SceneInstance {
   public var registry(default, null) : ComponentRegistry;
   public var entities(default, null) : Array<Entity> = [];
   public var warnings(default, null) : Array<String> = [];
+  // Prefab dosyasının metnini verir. `res` köküne göre yol alır.
+  public var prefabLoader : Null<String->String>;
 
+  var prefabs = new Map<String, SceneData>();
   var isReady = false;
   var services = new Map<String, Dynamic>();
 
@@ -114,6 +119,7 @@ class SceneInstance {
 
   public function load(data : SceneData) {
     clear();
+    prefabs = new Map();
     instantiate(data.entities);
     if (mode == Game) for (warning in warnings) Sys.println('Sahne uyarısı: $warning');
   }
@@ -122,42 +128,128 @@ class SceneInstance {
   public function instantiate(items : Array<EntityData>) : Array<Entity> {
     isReady = false;
     var created = [];
+    var flat = [];
     for (item in items) {
-      var entity = createEntity(item.name, item.id);
-      created.push(entity);
-      entity.setPosition(item.position[0], item.position[1], item.position[2]);
-      entity.setRotation(item.rotation[0], item.rotation[1], item.rotation[2]);
-      entity.setScale(item.scale[0], item.scale[1], item.scale[2]);
-      entity.active = item.active;
+      var entries = item.prefab == null ? null : expandPrefab(item);
+      if (entries == null) {
+        var entity = spawn(item);
+        // Açılamayan instance sahnede kalır, kayıtta yolu ve farkları korunur.
+        if (item.prefab != null) {
+          entity.prefab = item.prefab;
+          entity.instanceRoot = entity;
+          entity.unresolvedOverrides = item.overrides;
+        }
+        created.push(entity);
+        flat.push(item);
+        continue;
+      }
+      var root = null;
+      for (entry in entries) {
+        var entity = spawn(entry.data);
+        if (root == null) root = entity;
+        entity.instanceRoot = root;
+        entity.prefabBase = entry.base;
+        entity.prefabRelative = entry.relative;
+        created.push(entity);
+        flat.push(entry.data);
+      }
+      root.prefab = item.prefab;
     }
 
     // Üst nesne dosyada alttan sonra gelebilir, bu yüzden bağlar ayrı geçişte kurulur.
-    for (i in 0...items.length) {
-      var item = items[i];
+    for (i in 0...flat.length) {
+      var item = flat[i];
       if (item.parent == null) continue;
       var parent = find(item.parent);
       if (parent == null) warnings.push('${item.name}: üst nesne bulunamadı (${item.parent})');
       else created[i].setParent(parent);
     }
 
-    for (i in 0...items.length) for (saved in items[i].components) loadComponent(created[i], saved);
+    for (i in 0...flat.length) for (saved in flat[i].components) loadComponent(created[i], saved);
 
     isReady = true;
     for (entity in created) for (component in entity.components) createComponent(component);
     return created;
   }
 
-  public function toData() : SceneData {
-    var data = new SceneData(scene.data.SceneFormat.VERSION);
-    for (entity in entities) data.entities.push(saveEntity(entity));
+  // Prefab değişince instance yeniden kurulmaz: nesneler aynı kaldığı için undo geçmişi geçerli
+  // kalır. Farklar yapıyı değiştiremediğinden yalnızca değerler yazılır.
+  public function syncInstance(data : EntityData) {
+    for (entry in Prefabs.expand(data, prefabData, warn)) {
+      var entity = find(entry.data.id);
+      if (entity == null) {
+        warn('${data.name}: prefab\'ın yapısı değişmiş, sahneyi yeniden aç');
+        continue;
+      }
+      entity.prefabBase = entry.base;
+      syncValues(entity, entry.data);
+    }
+  }
+
+  public function forgetPrefab(path : String) {
+    prefabs.remove(path);
+  }
+
+  // Açılabilen tüm instance'lar, farklarıyla birlikte.
+  public function instances() : Array<EntityData> {
+    return [for (entity in entities) if (entity.prefab != null && entity.isPrefabResolved) saveEntity(entity)];
+  }
+
+  public function prefabData(path : String) : SceneData {
+    var data = prefabs.get(path);
+    if (data != null) return data;
+    if (prefabLoader == null) throw "prefab yükleyici tanımlı değil";
+    data = SceneFormat.read(prefabLoader(path));
+    prefabs.set(path, data);
     return data;
   }
 
-  // Nesne ve tüm alt nesneleri, sahnedeki sırasıyla.
-  public function toDataOf(selected : Array<Entity>) : SceneData {
-    var data = new SceneData(scene.data.SceneFormat.VERSION);
-    for (entity in entities) if (Lambda.exists(selected, root -> entity.isInside(root))) data.entities.push(saveEntity(entity));
+  public function toData() : SceneData {
+    var data = new SceneData(SceneFormat.VERSION);
+    for (entity in entities) if (!entity.isPrefabPart) data.entities.push(saveEntity(entity));
     return data;
+  }
+
+  // Nesne ve tüm alt nesneleri, sahnedeki sırasıyla. Kopyası alınan prefab parçası bağımsız nesne olur.
+  public function toDataOf(selected : Array<Entity>) : SceneData {
+    var data = new SceneData(SceneFormat.VERSION);
+    for (entity in entities) {
+      if (!Lambda.exists(selected, root -> entity.isInside(root))) continue;
+      var comesWithRoot = entity.isPrefabPart && Lambda.exists(selected, root -> entity.instanceRoot.isInside(root));
+      if (!comesWithRoot) data.entities.push(saveEntity(entity));
+    }
+    return data;
+  }
+
+  // Instance'ın prefab'dan farkları. Elle takip edilmez: gizmo, Inspector ve komutların hepsi
+  // aynı alanları değiştirdiği için kayıtta karşılaştırmak yeterlidir.
+  public function overridesOf(root : Entity) : Array<OverrideData> {
+    if (root.prefabBase == null) return root.unresolvedOverrides;
+    var result = [];
+    for (entity in entities) {
+      if (entity.instanceRoot != root) continue;
+      var base = entity.prefabBase;
+      var target = entity.prefabRelative;
+      function compare(field : String, was : Dynamic, now : Dynamic) {
+        if (!sameValue(was, now)) result.push(new OverrideData(target, field, now));
+      }
+      if (entity != root) {
+        compare("name", base.name, entity.name);
+        compare("active", base.active, entity.active);
+        compare("position", base.position, [entity.x, entity.y, entity.z]);
+        compare("rotation", base.rotation, [entity.rotX, entity.rotY, entity.rotZ]);
+        compare("scale", base.scale, [entity.scaleX, entity.scaleY, entity.scaleZ]);
+      }
+      for (saved in base.components) {
+        var component = componentOf(entity, saved.type);
+        if (component == null) continue;
+        var original = savedCopy(saved);
+        for (field in component.describeFields())
+          compare(Prefabs.COMPONENT_FIELD + component.componentId() + ":" + field.name, original.readField(field.name), component.readField(field.name));
+      }
+    }
+    Prefabs.sort(result);
+    return result;
   }
 
   public function start() {
@@ -170,6 +262,62 @@ class SceneInstance {
     for (entity in entities) {
       if (!entity.active) continue;
       for (component in entity.components) component.onUpdate(dt);
+    }
+  }
+
+  function syncValues(entity : Entity, item : EntityData) {
+    entity.name = item.name;
+    entity.active = item.active;
+    entity.setPosition(item.position[0], item.position[1], item.position[2]);
+    entity.setRotation(item.rotation[0], item.rotation[1], item.rotation[2]);
+    entity.setScale(item.scale[0], item.scale[1], item.scale[2]);
+    for (saved in item.components) {
+      var component = componentOf(entity, saved.type);
+      if (component == null) continue;
+      var target = savedCopy(saved);
+      var changed = false;
+      for (field in component.describeFields()) {
+        var value = target.readField(field.name);
+        if (sameValue(value, component.readField(field.name))) continue;
+        component.writeField(field.name, value);
+        changed = true;
+      }
+      if (changed) component.refresh();
+    }
+  }
+
+  function componentOf(entity : Entity, type : String) {
+    return Lambda.find(entity.components, item -> item.componentId() == type || item.formerIds().indexOf(type) >= 0);
+  }
+
+  // Kayıttaki değerleri taşıyan, sahneye bağlı olmayan kopya.
+  function savedCopy(saved : ComponentData) {
+    var component = registry.create(saved.type);
+    for (name => value in saved.fields) component.writeField(name, value);
+    return component;
+  }
+
+  static function sameValue(a : Dynamic, b : Dynamic) {
+    return SceneFormat.writeValue(a) == SceneFormat.writeValue(b);
+  }
+
+  function spawn(item : EntityData) {
+    var entity = createEntity(item.name, item.id);
+    entity.setPosition(item.position[0], item.position[1], item.position[2]);
+    entity.setRotation(item.rotation[0], item.rotation[1], item.rotation[2]);
+    entity.setScale(item.scale[0], item.scale[1], item.scale[2]);
+    entity.active = item.active;
+    return entity;
+  }
+
+  // Açılamazsa null döner: bozuk prefab sahneyi düşürmez.
+  function expandPrefab(item : EntityData) {
+    try {
+      return Prefabs.expand(item, prefabData, warn);
+    } catch (e : Dynamic) {
+      if (mode == Game) throw e;
+      warn('${item.name}: prefab açılamadı (${item.prefab}): $e');
+      return null;
     }
   }
 
@@ -204,6 +352,11 @@ class SceneInstance {
     data.position = [entity.x, entity.y, entity.z];
     data.rotation = [entity.rotX, entity.rotY, entity.rotZ];
     data.scale = [entity.scaleX, entity.scaleY, entity.scaleZ];
+    if (entity.prefab != null) {
+      data.prefab = entity.prefab;
+      data.overrides = overridesOf(entity);
+      return data;
+    }
     for (component in entity.components) {
       var saved = new ComponentData(component.componentId());
       for (field in component.describeFields()) saved.fields.set(field.name, component.readField(field.name));

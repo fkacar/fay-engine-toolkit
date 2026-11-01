@@ -67,6 +67,10 @@ class SceneFormat {
     if (raw.position != null) entity.position = raw.position;
     if (raw.rotation != null) entity.rotation = raw.rotation;
     if (raw.scale != null) entity.scale = raw.scale;
+    entity.prefab = raw.prefab;
+    var overrides : Array<Dynamic> = raw.overrides;
+    if (overrides != null)
+      for (item in overrides) entity.overrides.push(new OverrideData(item.target, item.field, item.value));
     var components : Array<Dynamic> = raw.components;
     if (components != null)
       for (item in components) {
@@ -86,6 +90,12 @@ class SceneFormat {
     out.add('\n      "position": ${vector(entity.position)},');
     out.add('\n      "rotation": ${vector(entity.rotation)},');
     out.add('\n      "scale": ${vector(entity.scale)},');
+    if (entity.prefab != null) out.add('\n      "prefab": ${quote(entity.prefab)},');
+    if (entity.overrides.length > 0) {
+      var lines = [for (item in entity.overrides)
+        '\n        {"target": ${quote(item.target)}, "field": ${quote(item.field)}, "value": ${writeValue(item.value)}}'];
+      out.add('\n      "overrides": [${lines.join(",")}\n      ],');
+    }
     out.add('\n      "components": [');
     for (i in 0...entity.components.length) {
       if (i > 0) out.add(",");
@@ -106,7 +116,7 @@ class SceneFormat {
   }
 
   // Tanınmayan alanlar da korunduğu için dizi ve nesneler de yazılabilir.
-  static function writeValue(value : Dynamic) : String {
+  public static function writeValue(value : Dynamic) : String {
     if (value == null) return "null";
     if (Std.isOfType(value, Bool)) return value ? "true" : "false";
     if (Std.isOfType(value, String)) return quote(value);

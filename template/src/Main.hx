@@ -34,6 +34,7 @@ class Main extends #if scene_editor imgui.ImGuiApp #else hxd.App #end {
     var play = PlayOptions.parse(Sys.args());
     var editing = #if scene_editor play == null #else false #end;
     level = new SceneInstance(GameComponents.registry(), editing ? SceneMode.Editor : SceneMode.Game, s3d);
+    level.prefabLoader = path -> hxd.Res.load(path).toText();
     level.load(SceneFormat.read(hxd.Res.load(play == null ? MAIN_SCENE : play.scene).toText()));
 
     #if scene_editor

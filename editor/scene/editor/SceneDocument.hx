@@ -10,6 +10,7 @@ import sys.io.File;
 class SceneDocument {
   static inline var SCENE_DIRECTORY = "res/scenes";
   static inline var SCENE_SUFFIX = ".scene.json";
+  static inline var PREFAB_SUFFIX = ".prefab.json";
   static inline var NEW_SCENE_NAME = "yeni";
   static inline var AUTOSAVE_DIRECTORY = EditorPrefs.DIRECTORY + "/autosave";
   static inline var AUTOSAVE_SECONDS = 60.;
@@ -121,6 +122,13 @@ class SceneDocument {
   public function showAll() {
     for (entity in scene.entities) if (entity.hiddenInEditor) entity.hiddenInEditor = false;
     rememberFlags();
+  }
+
+  // Prefab dosyası tek köklüdür, aksi halde instance'lar açılamaz.
+  public function prefabRootIssues() : Array<Validator.Issue> {
+    var roots = scene.entities.filter(entity -> entity.parent == null);
+    if (!StringTools.endsWith(path, PREFAB_SUFFIX) || roots.length < 2) return [];
+    return [{entity: roots[1], message: '${roots[1].name}: prefab tek köklü olmalı, nesneleri tek kökün altına al'}];
   }
 
   public function validate() {

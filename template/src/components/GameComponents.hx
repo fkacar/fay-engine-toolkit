@@ -1,6 +1,8 @@
 package components;
 
+import scene.ColliderComponent;
 import scene.ComponentRegistry;
+import scene.WaypointMarker;
 
 // Oyunun ve editörün tanıdığı bileşenler. Yeni bileşen buraya eklenir.
 class GameComponents {
@@ -8,6 +10,8 @@ class GameComponents {
     var types = new ComponentRegistry();
     types.register(BoxComponent);
     types.register(ModelComponent);
+    types.register(ColliderComponent);
+    types.register(WaypointMarker);
     return types;
   }
 }

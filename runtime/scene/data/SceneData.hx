@@ -19,10 +19,38 @@ class EntityData {
   public var rotation = [0., 0., 0.];  // derece
   public var scale = [1., 1., 1.];
   public var components : Array<ComponentData> = [];
+  // Prefab instance'ı: alt nesneler dosyada değil prefab'da durur, burada yalnızca farklar vardır.
+  public var prefab : Null<String>;
+  public var overrides : Array<OverrideData> = [];
 
   public function new(id : String, name : String) {
     this.id = id;
     this.name = name;
+  }
+
+  public function clone() {
+    var copy = new EntityData(id, name);
+    copy.parent = parent;
+    copy.active = active;
+    copy.position = position.copy();
+    copy.rotation = rotation.copy();
+    copy.scale = scale.copy();
+    copy.components = [for (component in components) component.clone()];
+    copy.prefab = prefab;
+    copy.overrides = overrides.copy();
+    return copy;
+  }
+}
+
+class OverrideData {
+  public var target : String;  // instance köküne göre kimlik, kök için boş
+  public var field : String;
+  public var value : Dynamic;
+
+  public function new(target : String, field : String, value : Dynamic) {
+    this.target = target;
+    this.field = field;
+    this.value = value;
   }
 }
 
@@ -32,5 +60,11 @@ class ComponentData {
 
   public function new(type : String) {
     this.type = type;
+  }
+
+  public function clone() {
+    var copy = new ComponentData(type);
+    for (name => value in fields) copy.fields.set(name, value);
+    return copy;
   }
 }

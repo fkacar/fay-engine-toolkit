@@ -15,12 +15,14 @@ class AssetBrowser {
   static inline var IMPORT_WAIT_FRAMES = 3;
   static inline var TILE_COLOR = 0xFF3A3A40;
   static inline var FOLDER_COLOR = 0xFF5A4A34;
+  static inline var PREFAB_COLOR = 0xFF2F5A86;
   static inline var LABEL_COLOR = 0xFFE0E0E0;
   static inline var FAILED_COLOR = 0xFFA03030;
 
   static var MODELS = ["fbx", "hmd"];
   static var IMAGES = ["png", "jpg", "jpeg", "tga", "dds"];
   static var SCENE_SUFFIX = ".scene.json";
+  static var PREFAB_SUFFIX = ".prefab.json";
 
   var editor : Editor;
   var directory = ROOT;
@@ -149,9 +151,9 @@ class AssetBrowser {
       var resource = path.substr(ROOT.length + 1);
       var activated = tile(name, size, height);
       if (ImGui.isItemHovered()) ImGui.setTooltip(failure(resource) == null ? resource : '$resource: ${failure(resource)}');
-      if (activated && StringTools.endsWith(name, SCENE_SUFFIX)) editor.requestOpen(path);
+      if (activated && isDocument(name)) editor.requestOpen(path);
       drawPreview(resource, name, size);
-      if (isModel(name) && ImGui.beginDragDropSource()) {
+      if (isPlaceable(name) && ImGui.beginDragDropSource()) {
         editor.assetDrag = resource;
         ImGui.setDragDropPayload(PAYLOAD, payload, 1);
         ImGui.text(name);
@@ -173,7 +175,8 @@ class AssetBrowser {
     var extension = Path.extension(name).toLowerCase();
     var texture = MODELS.indexOf(extension) >= 0 ? editor.previews.textureOf(resource) : IMAGES.indexOf(extension) >= 0 ? image(resource) : null;
     if (texture == null) {
-      fill(failure(resource) == null ? TILE_COLOR : FAILED_COLOR, size, name);
+      var color = failure(resource) != null ? FAILED_COLOR : StringTools.endsWith(name, PREFAB_SUFFIX) ? PREFAB_COLOR : TILE_COLOR;
+      fill(color, size, name);
       return;
     }
     var at = tileOrigin();
@@ -212,7 +215,11 @@ class AssetBrowser {
     return editor.previews.failureOf(resource);
   }
 
-  static function isModel(name : String) {
-    return MODELS.indexOf(Path.extension(name).toLowerCase()) >= 0;
+  static function isDocument(name : String) {
+    return StringTools.endsWith(name, SCENE_SUFFIX) || StringTools.endsWith(name, PREFAB_SUFFIX);
+  }
+
+  static function isPlaceable(name : String) {
+    return MODELS.indexOf(Path.extension(name).toLowerCase()) >= 0 || StringTools.endsWith(name, PREFAB_SUFFIX);
   }
 }

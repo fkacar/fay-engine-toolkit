@@ -4,6 +4,7 @@ import imgui.ImGui;
 import scene.Component;
 import scene.Entity;
 import scene.FieldInfo;
+import scene.RouteMarker;
 import scene.editor.commands.AddComponentCommand;
 import scene.editor.commands.GroupCommand;
 import scene.editor.commands.RemoveComponentCommand;
@@ -20,6 +21,8 @@ class InspectorPanel {
   static inline var ADD_COMPONENT = "add-component";
   static inline var MIXED = "karışık";
   static inline var NUMBER = "%.6f";
+  static inline var APPLY_TIP = "Farkları prefab dosyasına yazar, tüm kopyalar güncellenir.";
+  static inline var REVERT_TIP = "Bu kopyayı prefab'daki haline döndürür.";
   static inline var LABEL_SAMPLE = "Yükseklik ";
   static inline var LABEL_SHARE = 0.35;
 
@@ -48,7 +51,10 @@ class InspectorPanel {
     ImGui.pushItemWidth(-Math.max(ImGui.calcTextSize(LABEL_SAMPLE).x, ImGui.getContentRegionAvail().x * LABEL_SHARE));
     var together = entities.length > 1;
     if (together) ImGui.textWrapped('${entities.length} nesne kilitli. Sahnede tek parça gibi taşınır, döner ve ölçeklenir.');
-    else drawName(primary);
+    else {
+      drawName(primary);
+      drawPrefab(primary);
+    }
     drawVisibility(entities);
     if (!together && ImGui.collapsingHeader("Dönüşüm", ImGuiTreeNodeFlags.DefaultOpen)) drawTransform(primary);
     for (component in primary.components) {
@@ -60,7 +66,8 @@ class InspectorPanel {
       editor.commands.execute(new GroupCommand("Bileşeni kaldır", commands));
       removing = null;
     }
-    drawAddComponent(entities);
+    // Prefab'dan gelen nesnenin bileşen listesi prefab'a aittir, farklar yalnızca alanlarda tutulur.
+    if (!Lambda.exists(entities, entity -> entity.instanceRoot != null)) drawAddComponent(entities);
     ImGui.popItemWidth();
   }
 
@@ -70,6 +77,34 @@ class InspectorPanel {
     if (ImGui.isItemActivated()) nameStart = entity.name;
     if (edited) entity.name = name;
     if (ImGui.isItemDeactivatedAfterEdit()) editor.commands.execute(new SetNameCommand(entity, nameStart, name));
+  }
+
+  function drawPrefab(entity : Entity) {
+    if (entity.isPrefabPart) {
+      ImGui.textDisabled('${entity.instanceRoot.name} prefab parçası');
+      return;
+    }
+    var actions = editor.actions;
+    if (entity.prefab == null) {
+      if (ImGui.button("Prefab yap")) editor.askPrefabName();
+      return;
+    }
+    ImGui.textDisabled(entity.prefab);
+    if (!entity.isPrefabResolved) {
+      ImGui.text("Prefab açılamadı");
+      return;
+    }
+    var count = editor.scene.overridesOf(entity).length;
+    ImGui.text(count == 0 ? "Prefab'la aynı" : '$count fark var');
+    ImGui.beginDisabled(count == 0);
+    if (ImGui.button("Prefab'a uygula")) actions.applyPrefab(entity);
+    if (ImGui.isItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.setTooltip(APPLY_TIP);
+    ImGui.sameLine();
+    if (ImGui.button("Farkları sil")) actions.revertPrefab(entity);
+    if (ImGui.isItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.setTooltip(REVERT_TIP);
+    ImGui.endDisabled();
+    ImGui.sameLine();
+    if (ImGui.button("Aç")) actions.openPrefab(entity);
   }
 
   function drawVisibility(entities : Array<Entity>) {
@@ -125,11 +160,15 @@ class InspectorPanel {
     var name = component.componentId();
     ImGui.pushID(name);
     var open = ImGui.collapsingHeader(name, ImGuiTreeNodeFlags.DefaultOpen);
-    if (ImGui.beginPopupContextItem()) {
+    if (component.entity.instanceRoot == null && ImGui.beginPopupContextItem()) {
       if (ImGui.menuItem("Bileşeni kaldır")) removing = peers;
       ImGui.endPopup();
     }
-    if (open) for (field in component.describeFields()) drawField(peers, field);
+    if (open) {
+      for (field in component.describeFields()) drawField(peers, field);
+      var route = Std.downcast(component, RouteMarker);
+      if (route != null && ImGui.button("Nokta ekle")) editor.actions.addWaypoint(route);
+    }
     ImGui.popID();
   }
 
@@ -158,21 +197,95 @@ class InspectorPanel {
         var mixed = Lambda.exists(peers, other -> other.readField(field.name) != before);
         var edited = ImGui.dragDouble(label, value, 0.1, low, high, mixed ? MIXED : NUMBER);
         trackEdit(peers, field, value, edited);
+      case KInt if (field.hint == HColor):
+        drawColor(peers, field, label, before);
       case KInt:
         var value : Int = before;
         var edited = ImGui.inputInt(label, value);
         trackEdit(peers, field, value, edited);
-      case KString if (field.hint == HEntity):
-        drawEntityField(peers, field, label, before);
       case KString:
-        var value : String = before;
-        var edited = ImGui.inputText(label, value);
-        trackEdit(peers, field, value, edited);
-        if (field.hint == HAsset) acceptAsset(peers, field);
+        switch (field.hint) {
+          case HEntity: drawEntityField(peers, field, label, before);
+          case HPrefab: drawOptions(peers, field, label, before, editor.actions.prefabFiles(), true);
+          case HChoice(options): drawOptions(peers, field, label, before, options, false);
+          default:
+            var value : String = before;
+            var edited = ImGui.inputText(label, value);
+            trackEdit(peers, field, value, edited);
+            if (field.hint == HAsset) acceptAsset(peers, field);
+        }
+      case KStringList:
+        drawTextList(peers, field, before);
+      case KFloatList:
+        drawNumberList(peers, field, before);
       case KBool:
         var value : Bool = before;
         if (ImGui.checkbox(label, value)) set(peers, field, value);
     }
+  }
+
+  function drawColor(peers : Array<Component>, field : FieldInfo, label : String, value : Int) {
+    var rgb = new hl.NativeArray<Single>(3);
+    rgb[0] = (value >> 16 & 255) / 255;
+    rgb[1] = (value >> 8 & 255) / 255;
+    rgb[2] = (value & 255) / 255;
+    var edited = ImGui.colorEdit3(label, rgb);
+    var packed = Math.round(rgb[0] * 255) << 16 | Math.round(rgb[1] * 255) << 8 | Math.round(rgb[2] * 255);
+    trackEdit(peers, field, packed, edited);
+  }
+
+  function drawOptions(peers : Array<Component>, field : FieldInfo, label : String, before : String, options : Array<String>, canBeEmpty : Bool) {
+    if (!ImGui.beginCombo(label, before == "" ? "(yok)" : before)) return;
+    // hlimgui sabit değeri Ref sürümüne bağlar ve yerel kodda çöker: değer değişkenle verilir.
+    var empty = before == "";
+    if (canBeEmpty && ImGui.selectable("(yok)", empty)) set(peers, field, "");
+    for (option in options) {
+      var chosen = option == before;
+      if (ImGui.selectable(option, chosen)) set(peers, field, option);
+    }
+    ImGui.endCombo();
+  }
+
+  function drawTextList(peers : Array<Component>, field : FieldInfo, values : Array<String>) {
+    ImGui.textDisabled(field.label);
+    for (i in 0...values.length) {
+      ImGui.pushID(field.name + i);
+      var value = values[i];
+      var edited = ImGui.inputText("##deger", value);
+      var next = values.copy();
+      next[i] = value;
+      trackEdit(peers, field, next, edited);
+      ImGui.sameLine();
+      if (ImGui.smallButton("Sil")) removeAt(peers, field, values, i);
+      ImGui.popID();
+    }
+    ImGui.pushID(field.name);
+    if (ImGui.smallButton("Ekle")) set(peers, field, values.concat([""]));
+    ImGui.popID();
+  }
+
+  function drawNumberList(peers : Array<Component>, field : FieldInfo, values : Array<Float>) {
+    ImGui.textDisabled(field.label);
+    for (i in 0...values.length) {
+      ImGui.pushID(field.name + i);
+      var value = values[i];
+      var edited = ImGui.dragDouble("##deger", value, 0.1);
+      var next = values.copy();
+      next[i] = value;
+      trackEdit(peers, field, next, edited);
+      ImGui.sameLine();
+      if (ImGui.smallButton("Sil")) removeAt(peers, field, values, i);
+      ImGui.popID();
+    }
+    ImGui.pushID(field.name);
+    if (ImGui.smallButton("Ekle")) set(peers, field, values.concat([0.]));
+    ImGui.popID();
+  }
+
+  function removeAt<T>(peers : Array<Component>, field : FieldInfo, values : Array<T>, index : Int) {
+    var next = values.copy();
+    next.splice(index, 1);
+    set(peers, field, next);
   }
 
   function acceptAsset(peers : Array<Component>, field : FieldInfo) {

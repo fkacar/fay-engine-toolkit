@@ -13,6 +13,7 @@ class EditorPrefs {
 
   public var recent(default, null) : Array<String> = [];
   public var layoutVersion(default, null) = 0;
+  public var hiddenMarkers(default, null) : Array<String> = [];
 
   var hidden : DynamicAccess<Array<String>> = {};
   var groups : DynamicAccess<Array<Array<String>>> = {};
@@ -25,9 +26,15 @@ class EditorPrefs {
       if (saved.hidden != null) hidden = saved.hidden;
       if (saved.groups != null) groups = saved.groups;
       if (saved.layoutVersion != null) layoutVersion = saved.layoutVersion;
+      if (saved.hiddenMarkers != null) hiddenMarkers = saved.hiddenMarkers;
     } catch (e : Dynamic) {
       // Bozuk ayar dosyası editörü durdurmamalı, varsayılanlarla devam edilir.
     }
+  }
+
+  public function setHiddenMarkers(types : Array<String>) {
+    hiddenMarkers = types;
+    save();
   }
 
   public function setLayoutVersion(version : Int) {
@@ -67,6 +74,6 @@ class EditorPrefs {
 
   function save() {
     if (!FileSystem.exists(DIRECTORY)) FileSystem.createDirectory(DIRECTORY);
-    File.saveContent(FILE, haxe.Json.stringify({recent: recent, hidden: hidden, groups: groups, layoutVersion: layoutVersion}, null, "  "));
+    File.saveContent(FILE, haxe.Json.stringify({recent: recent, hidden: hidden, groups: groups, layoutVersion: layoutVersion, hiddenMarkers: hiddenMarkers}, null, "  "));
   }
 }

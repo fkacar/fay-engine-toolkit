@@ -106,6 +106,7 @@ class HierarchyPanel {
 
   function rowLabel(entity : Entity) {
     var label = entity.active ? entity.name : entity.name + " (oyunda kapalı)";
+    if (entity.prefab != null) label += " (prefab)";
     return editor.groups.groupOf(entity) == null ? label : label + " (kilitli)";
   }
 
@@ -126,6 +127,8 @@ class HierarchyPanel {
     var actions = editor.actions;
     if (!editor.selection.has(entity)) editor.selection.set([entity]);
     if (ImGui.menuItem("Yeniden adlandır", "F2")) rename(entity);
+    if (entity.prefab != null && ImGui.menuItem("Prefab'ı aç")) deferred.push(() -> actions.openPrefab(entity));
+    if (entity.prefab == null && !entity.isPrefabPart && ImGui.menuItem("Prefab yap")) editor.askPrefabName();
     if (ImGui.menuItem("Alt nesne ekle")) deferred.push(() -> actions.createEmpty(entity));
     if (ImGui.menuItem("Çoğalt", editor.commandName + "+D")) deferred.push(actions.duplicate);
     if (ImGui.menuItem("Sil", "Del")) deferred.push(actions.remove);

@@ -4,6 +4,7 @@ package scene.macro;
 import haxe.macro.Context;
 import haxe.macro.Type;
 import haxe.macro.TypeTools;
+import scene.data.SceneFormat;
 import scene.data.SceneSchema;
 import sys.FileSystem;
 import sys.io.File;
@@ -12,8 +13,10 @@ import sys.io.File;
 // sahne güncellenmediyse derleme durur; böylece sorun değişikliği yapan geliştiriciye çıkar.
 //
 //   --macro scene.macro.SceneCheck.run("res/scenes")
+//   --macro scene.macro.SceneCheck.run("res/prefabs")
 class SceneCheck {
   static inline var SCENE_EXTENSION = ".scene.json";
+  static inline var PREFAB_EXTENSION = ".prefab.json";
 
   public static function run(directory : String) {
     Context.onAfterTyping(types -> {
@@ -27,8 +30,13 @@ class SceneCheck {
       for (name in sceneFiles(directory)) {
         var path = directory + "/" + name;
         var pos = Context.makePosition({file: path, min: 0, max: 0});
-        for (problem in schema.check(File.getContent(path))) {
+        var resources = haxe.io.Path.directory(directory);
+        for (problem in schema.check(File.getContent(path), prefab -> FileSystem.exists('$resources/$prefab'))) {
           Context.reportError(problem, pos);
+          failed = true;
+        }
+        if (StringTools.endsWith(name, PREFAB_EXTENSION) && scene.data.Prefabs.rootOf(SceneFormat.read(File.getContent(path))) == null) {
+          Context.reportError('$name: prefab tek köklü olmalı', pos);
           failed = true;
         }
       }
@@ -38,7 +46,7 @@ class SceneCheck {
 
   static function sceneFiles(directory : String) {
     if (!FileSystem.exists(directory)) return [];
-    return FileSystem.readDirectory(directory).filter(name -> StringTools.endsWith(name, SCENE_EXTENSION));
+    return FileSystem.readDirectory(directory).filter(name -> StringTools.endsWith(name, SCENE_EXTENSION) || StringTools.endsWith(name, PREFAB_EXTENSION));
   }
 
   static function addComponent(schema : SceneSchema, cls : ClassType) {

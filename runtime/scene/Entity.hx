@@ -1,6 +1,8 @@
 package scene;
 
 import scene.data.SceneData.ComponentData;
+import scene.data.SceneData.EntityData;
+import scene.data.SceneData.OverrideData;
 
 // Sahnedeki bir nesne. Dönüş dosyada ve burada derecedir, Heaps'e radyan olarak verilir.
 @:allow(scene)
@@ -27,8 +29,19 @@ class Entity {
   public var scaleY(default, null) = 1.;
   public var scaleZ(default, null) = 1.;
 
+  // Prefab'dan gelen nesneler: kök instance'ı, `prefab` yolunu yalnızca kök taşır.
+  public var instanceRoot(default, null) : Null<Entity>;
+  public var prefab(default, null) : Null<String>;
+  public var isPrefabPart(get, never) : Bool;
+  public var isPrefabResolved(get, never) : Bool;
+
+  var prefabBase : Null<EntityData>;
+  var prefabRelative = "";
+
   // Bu derlemede kayıtlı olmayan bileşenler silinmez, olduğu gibi geri yazılır.
   var unknownComponents : Array<ComponentData> = [];
+  // Açılamayan prefab'ın farkları kaybolmasın.
+  var unresolvedOverrides : Array<OverrideData> = [];
 
   function new(scene : SceneInstance, id : String, name : String) {
     this.scene = scene;
@@ -115,6 +128,14 @@ class Entity {
     object.scaleY = scaleY;
     object.scaleZ = scaleZ;
     for (component in components) component.onEntityMoved();
+  }
+
+  function get_isPrefabPart() {
+    return instanceRoot != null && instanceRoot != this;
+  }
+
+  function get_isPrefabResolved() {
+    return prefabBase != null;
   }
 
   function isVisibleItself() {
