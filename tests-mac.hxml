@@ -1,0 +1,3 @@
+libs/scene-toolkit/tests-common.hxml
+-D no-compilation
+-hl bin/tests-c/main.c

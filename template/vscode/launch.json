@@ -1,0 +1,23 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Oyun",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "./run.sh",
+            "windows": {
+                "command": "./run.bat"
+            }
+        },
+        {
+            "name": "Editör",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "./run.sh editor",
+            "windows": {
+                "command": "./run.bat editor"
+            }
+        }
+    ]
+}

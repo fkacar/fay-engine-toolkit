@@ -1,0 +1,4 @@
+# Her dosya her iki sistemde de LF kalir, boylece sahte satir sonu farki cikmaz.
+* text=auto eol=lf
+# cmd.exe LF ile etiketleri yanlis okuyabilir.
+*.bat text eol=crlf

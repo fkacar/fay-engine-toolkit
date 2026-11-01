@@ -1,0 +1,5 @@
+-cp libs/scene-toolkit/runtime
+-cp libs/scene-toolkit/editor
+-cp libs/scene-toolkit/tests
+-cp libs/scene-toolkit/tests/stubs
+-main TestMain
