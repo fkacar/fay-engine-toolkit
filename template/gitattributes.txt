@@ -3,6 +3,7 @@
 # cmd.exe LF ile etiketleri yanlis okuyabilir.
 *.bat text eol=crlf
 *.fbx filter=lfs diff=lfs merge=lfs -text
+*.hmd filter=lfs diff=lfs merge=lfs -text
 *.glb filter=lfs diff=lfs merge=lfs -text
 *.blend filter=lfs diff=lfs merge=lfs -text
 *.psd filter=lfs diff=lfs merge=lfs -text

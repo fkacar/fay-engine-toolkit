@@ -11,6 +11,7 @@ private typedef Editable = {
   var kind : String;
   var min : Null<Float>;
   var max : Null<Float>;
+  var hint : String;
   var former : Array<String>;
 }
 
@@ -21,6 +22,8 @@ private typedef Editable = {
 //   @:editable("Yükseklik") var height : Float = 4;
 //   @:editable("Yükseklik", 1, 20) var height : Float = 4;
 //   @:editable @:formerly("h") var height : Float = 4;
+//   @:editable("Model") @:asset var path : String = "";
+//   @:editable("Hedef") @:entity var target : String = "";
 class ComponentMacro {
   public static function build() : Array<Field> {
     var fields = Context.getBuildFields();
@@ -39,6 +42,7 @@ class ComponentMacro {
       kind: $p{["scene", "FieldInfo", "FieldKind", item.kind]},
       min: $v{item.min},
       max: $v{item.max},
+      hint: $p{["scene", "FieldInfo", "FieldHint", item.hint]},
     })];
     var reads = [for (item in editable) {
       var name = item.name;
@@ -86,8 +90,15 @@ class ComponentMacro {
       kind: kindOf(field),
       min: params.length > 1 ? params[1] : null,
       max: params.length > 2 ? params[2] : null,
+      hint: hintOf(field),
       former: strings(field.meta.filter(entry -> entry.name == ":formerly")),
     };
+  }
+
+  static function hintOf(field : Field) : String {
+    if (Lambda.exists(field.meta, entry -> entry.name == ":asset")) return "HAsset";
+    if (Lambda.exists(field.meta, entry -> entry.name == ":entity")) return "HEntity";
+    return "HNone";
   }
 
   static function kindOf(field : Field) : String {

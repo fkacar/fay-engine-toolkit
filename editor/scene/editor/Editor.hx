@@ -4,32 +4,31 @@ import h3d.mat.Texture;
 import hxd.Key;
 import imgui.ImGui;
 import imgui.types.ImFontAtlas.ImFontTexData;
-import scene.FieldInfo;
 import scene.HiDpi;
-import scene.data.SceneData;
-import scene.data.SceneFormat;
-import scene.editor.commands.SetFieldCommand;
-import scene.editor.commands.SetNameCommand;
-import scene.editor.commands.SetTransformCommand;
-import scene.editor.commands.SetTransformCommand.Transform;
+import scene.PlayOptions;
+import scene.editor.panels.AssetBrowser;
+import scene.editor.panels.HierarchyPanel;
+import scene.editor.panels.InspectorPanel;
 import sys.FileSystem;
-import sys.io.File;
 
 typedef Panel = {
   var title : String;
   var draw : Void->Void;
 }
 
-// Unity düzenindeki editör kabuğu. Oyuna özel paneller addPanel ile eklenir.
+// Unity düzenindeki editör kabuğu. Oyuna özel paneller addPanel, kurallar validator.rules,
+// zemin ve asset türleri actions üzerinden eklenir.
 class Editor {
   static inline var LAYOUT_FILE = "imgui.ini";
-  static inline var NEW_SCENE_PATH = "res/scenes/yeni.scene.json";
   static inline var FONT_PATH = "libs/scene-toolkit/editor/fonts/DejaVuSansMono.ttf";
   static inline var FONT_SIZE = 15;
   static inline var HIERARCHY = "Hierarchy";
   static inline var INSPECTOR = "Inspector";
   static inline var ASSETS = "Asset Browser";
   static inline var WARNINGS = "Uyarılar";
+  static inline var DIRTY_POPUP = "Kaydedilmemiş değişiklik";
+  static inline var SAVE_AS_POPUP = "Farklı kaydet";
+  static inline var RECOVERY_POPUP = "Otomatik yedek";
   static inline var DOCK_SPACE_NODE = 1 << 10;
   static inline var NOTICE_SECONDS = 2.5;
   static inline var NOTICE_MARGIN = 12;
@@ -41,39 +40,63 @@ class Editor {
   static var WARNING_COLOR : ImVec4 = {x: 0.95, y: 0.75, z: 0.35, w: 1};
   static var ERROR_COLOR : ImVec4 = {x: 1, y: 0.45, z: 0.4, w: 1};
 
+  public var scene(default, null) : SceneInstance;
   public var commands(default, null) = new CommandStack();
-  // Doluyken oyun tuşları (kamera gibi) dinlenmemeli: metin yazılıyor veya kısayol basılıyor.
-  public var wantsKeyboard(get, never) : Bool;
+  public var selection(default, null) = new Selection();
+  public var validator(default, null) : Validator;
+  public var document(default, null) : SceneDocument;
+  public var actions(default, null) : SceneActions;
+  public var viewport(default, null) : Viewport;
+  public var hierarchy(default, null) : HierarchyPanel;
+  public var importer(default, null) = new AssetImporter();
+  public var previews(default, null) = new ModelPreview();
+  public var interfaceScale(default, null) = 1.;
+  public var commandName(default, null) = Sys.systemName() == "Mac" ? "Cmd" : "Ctrl";
+  public var centerX(default, null) = 0.;
+  public var centerY(default, null) = 0.;
+  // Asset Browser'dan sürüklenen dosya, `res` köküne göre.
+  public var assetDrag : Null<String>;
 
-  var scene : SceneInstance;
-  var path : String;
-  var selected : Null<Entity>;
+  var inspector : InspectorPanel;
+  var assets : AssetBrowser;
+  var session = new PlaySession();
   var panels : Array<Panel> = [];
-  var lastSaved = "";
+  var messages : Array<String> = [];
   var notice = "";
   var noticeIsError = false;
   var noticeTime = 0.;
-  var commandName = Sys.systemName() == "Mac" ? "Cmd" : "Ctrl";
   var layoutPending : Bool;
-  var editStart : Dynamic;
-  var transformStart : Transform;
+  var showAssets = false;
   var glyphRanges : hl.NativeArray<hl.UI16>;
   var fontTexture : Texture;
-  var interfaceScale = 1.;
+  var pendingAction : Null<Void->Void>;
+  var openDirtyPopup = false;
+  var openSaveAsPopup = false;
+  var saveAsName = "";
 
   public function new(scene : SceneInstance, path : String) {
     this.scene = scene;
-    this.path = path;
     layoutPending = !FileSystem.exists(LAYOUT_FILE);
 
     var io = ImGui.getIO();
     io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
     scaleInterface();
-    hxd.Window.getInstance().addResizeEvent(() -> if (HiDpi.density != interfaceScale) scaleInterface());
+    var window = hxd.Window.getInstance();
+    window.addResizeEvent(() -> if (HiDpi.density != interfaceScale) scaleInterface());
+    window.onClose = onWindowClose;
 
-    addPanel(HIERARCHY, drawHierarchy);
-    addPanel(INSPECTOR, drawInspector);
-    addPanel(ASSETS, () -> ImGui.textDisabled("Faz 1"));
+    validator = new Validator(assetExists);
+    document = new SceneDocument(this, scene, path);
+    actions = new SceneActions(this);
+    viewport = new Viewport(this, scene.root.getScene().camera);
+    hierarchy = new HierarchyPanel(this);
+    inspector = new InspectorPanel(this);
+    assets = new AssetBrowser(this);
+    document.validate();
+
+    addPanel(HIERARCHY, hierarchy.draw);
+    addPanel(INSPECTOR, inspector.draw);
+    addPanel(ASSETS, assets.draw);
     addPanel(WARNINGS, drawWarnings);
   }
 
@@ -82,6 +105,12 @@ class Editor {
   }
 
   public function draw() {
+    var dt = hxd.Timer.dt;
+    selection.purge(scene);
+    document.update(dt);
+    var failure = session.poll();
+    if (failure != null) report(failure);
+
     readShortcuts();
     drawMenu();
     drawDockSpace();
@@ -89,61 +118,93 @@ class Editor {
       if (ImGui.begin(panel.title)) panel.draw();
       ImGui.end();
     }
+    if (showAssets) ImGui.setWindowFocus(ASSETS);
+    showAssets = false;
+    viewport.update(dt);
     drawNotice();
+    drawPopups();
   }
 
-  public function save() {
-    try {
-      File.saveContent(path, SceneFormat.write(scene.toData()));
-    } catch (e : Dynamic) {
-      show('Kaydedilemedi: $e', true);
-      return;
-    }
-    commands.markSaved();
-    lastSaved = DateTools.format(Date.now(), "%H:%M:%S");
-    show('Kaydedildi: $path');
+  // Asset önizlemeleri ekrana değil dokuya çizilir, bu yüzden kare çizilirken çağrılır.
+  public function render(engine : h3d.Engine) {
+    previews.render(engine);
   }
 
-  public function reopen() {
-    try {
-      scene.load(SceneFormat.read(File.getContent(path)));
-    } catch (e : Dynamic) {
-      show('Açılamadı: $e', true);
-      return;
-    }
-    afterLoad("Açıldı: " + path);
-  }
-
-  public function newScene() {
-    scene.load(new SceneData(SceneFormat.VERSION));
-    path = NEW_SCENE_PATH;
-    afterLoad("Yeni sahne: " + path);
-  }
-
-  function afterLoad(message : String) {
-    selected = null;
-    commands.clear();
-    lastSaved = "";
-    show(message);
-  }
-
-  function show(message : String, isError = false) {
+  public function show(message : String, isError = false) {
     notice = message;
     noticeIsError = isError;
     noticeTime = NOTICE_SECONDS;
   }
 
-  function isCommandHeld() {
+  // Kalıcı sorunlar: içe aktarma ve oyun hataları Uyarılar panelinde kalır.
+  public function report(message : String) {
+    if (messages.indexOf(message) < 0) messages.push(message);
+  }
+
+  public function isCommandHeld() {
     return Key.isDown(Key.CTRL) || Key.isDown(Key.LEFT_WINDOW_KEY) || Key.isDown(Key.RIGHT_WINDOW_KEY);
   }
 
+  public function requestOpen(path : String) {
+    guard(() -> document.open(path));
+  }
+
+  // Kaydedilmemiş iş kaybolacaksa önce sorulur.
+  function guard(action : Void->Void) {
+    if (!commands.isDirty) {
+      action();
+      return;
+    }
+    pendingAction = action;
+    openDirtyPopup = true;
+  }
+
+  function onWindowClose() {
+    if (!commands.isDirty) return true;
+    guard(() -> hxd.System.exit());
+    return false;
+  }
+
+  function assetExists(path : String) {
+    AssetImporter.forgetMissingFiles();
+    return hxd.Res.loader.exists(path);
+  }
+
+  function play() {
+    if (session.isRunning) {
+      show("Oyun zaten açık");
+      return;
+    }
+    if ((commands.isDirty || !FileSystem.exists(document.path)) && !document.save()) return;
+    var view = scene.root.getScene().camera;
+    session.start(new PlayOptions(document.resourcePath(), [view.pos.x, view.pos.y, view.pos.z, view.target.x, view.target.y, view.target.z]));
+    show("Oyun açılıyor");
+  }
+
   function readShortcuts() {
-    if (!isCommandHeld()) return;
-    if (Key.isPressed(Key.S)) save();
-    // Metin yazılırken Cmd+Z o alana aittir; açık alan geri alınan değeri de ezerdi.
-    if (ImGui.getIO().WantTextInput) return;
-    if (Key.isPressed(Key.Z)) Key.isDown(Key.SHIFT) ? redo() : undo();
-    if (Key.isPressed(Key.Y)) redo();
+    var io = ImGui.getIO();
+    if (isCommandHeld()) {
+      if (Key.isPressed(Key.S)) document.save();
+      // Metin yazılırken Cmd+Z o alana aittir; açık alan geri alınan değeri de ezerdi.
+      if (io.WantTextInput) return;
+      if (Key.isPressed(Key.Z)) Key.isDown(Key.SHIFT) ? redo() : undo();
+      if (Key.isPressed(Key.Y)) redo();
+      if (Key.isPressed(Key.C)) actions.copy();
+      if (Key.isPressed(Key.V)) actions.paste();
+      if (Key.isPressed(Key.D)) actions.duplicate();
+      return;
+    }
+    if (io.WantCaptureKeyboard) return;
+    if (Key.isPressed(Key.F5)) play();
+    if (Key.isPressed(Key.F2)) hierarchy.rename(selection.primary);
+    if (Key.isPressed(Key.F)) actions.focus();
+    if (Key.isPressed(Key.END)) actions.snapToGround();
+    if (Key.isPressed(Key.ESCAPE)) selection.clear();
+    if (Key.isPressed(Key.DELETE) || Key.isPressed(Key.BACKSPACE)) actions.remove();
+    if (viewport.isFlying) return;
+    if (Key.isPressed(Key.W)) viewport.gizmo.tool = Move;
+    if (Key.isPressed(Key.E)) viewport.gizmo.tool = Rotate;
+    if (Key.isPressed(Key.R)) viewport.gizmo.tool = Scale;
   }
 
   function undo() {
@@ -168,22 +229,57 @@ class Editor {
 
   function drawMenu() {
     if (!ImGui.beginMainMenuBar()) return;
-    if (ImGui.beginMenu("Dosya")) {
-      if (ImGui.menuItem("Yeni sahne")) newScene();
-      if (ImGui.menuItem("Kaydet", commandName + "+S")) save();
-      if (ImGui.menuItem("Diskten yeniden aç")) reopen();
-      ImGui.endMenu();
-    }
+    drawFileMenu();
     if (ImGui.beginMenu("Düzen")) {
       if (ImGui.menuItem("Geri al", commandName + "+Z", false, commands.canUndo)) undo();
       if (ImGui.menuItem("Yinele", commandName + "+Y", false, commands.canRedo)) redo();
+      ImGui.separator();
+      if (ImGui.menuItem("Kopyala", commandName + "+C")) actions.copy();
+      if (ImGui.menuItem("Yapıştır", commandName + "+V")) actions.paste();
+      if (ImGui.menuItem("Çoğalt", commandName + "+D")) actions.duplicate();
+      if (ImGui.menuItem("Sil", "Del")) actions.remove();
+      ImGui.separator();
+      if (ImGui.menuItem("Boş nesne ekle")) actions.createEmpty();
+      if (ImGui.menuItem("Zemine yapıştır", "End")) actions.snapToGround();
+      if (ImGui.menuItem("Seçilene odaklan", "F")) actions.focus();
       ImGui.endMenu();
     }
-    ImGui.textDisabled(path);
+    if (ImGui.beginMenu("Görünüm")) {
+      if (ImGui.menuItem("Editörde gizlenenleri göster")) document.showAll();
+      ImGui.endMenu();
+    }
+    if (ImGui.beginMenu("Oyun")) {
+      if (ImGui.menuItem("Buradan oyna", "F5", false, !session.isRunning)) play();
+      ImGui.endMenu();
+    }
+    ImGui.textDisabled(document.path);
     if (commands.isDirty) ImGui.textColored(WARNING_COLOR, "Kaydedilmemiş değişiklik var");
-    else if (lastSaved != "") ImGui.textDisabled('Son kayıt: $lastSaved');
-    if (scene.warnings.length > 0) ImGui.textColored(WARNING_COLOR, 'Uyarı: ${scene.warnings.length}');
+    else if (document.lastSaved != "") ImGui.textDisabled('Son kayıt: ${document.lastSaved}');
+    var warnings = document.warningCount() + messages.length;
+    if (warnings > 0) ImGui.textColored(WARNING_COLOR, 'Uyarı: $warnings');
+    if (session.isRunning) ImGui.textColored(SUCCESS_COLOR, "Oyun açık");
     ImGui.endMainMenuBar();
+  }
+
+  function drawFileMenu() {
+    if (!ImGui.beginMenu("Dosya")) return;
+    if (ImGui.menuItem("Yeni sahne")) guard(document.newScene);
+    if (ImGui.beginMenu("Aç")) {
+      for (path in document.sceneFiles()) if (ImGui.menuItem(path)) requestOpen(path);
+      ImGui.endMenu();
+    }
+    if (ImGui.beginMenu("Son açılanlar", document.prefs.recent.length > 0)) {
+      for (path in document.prefs.recent.copy()) if (ImGui.menuItem(path)) requestOpen(path);
+      ImGui.endMenu();
+    }
+    ImGui.separator();
+    if (ImGui.menuItem("Kaydet", commandName + "+S")) document.save();
+    if (ImGui.menuItem("Farklı kaydet")) {
+      saveAsName = "";
+      openSaveAsPopup = true;
+    }
+    if (ImGui.menuItem("Diskten yeniden aç")) guard(document.reopen);
+    ImGui.endMenu();
   }
 
   // Ekranın üstünde kısa süre görünür, odağı ve tıklamaları almaz.
@@ -191,11 +287,64 @@ class Editor {
     if (noticeTime <= 0) return;
     noticeTime -= hxd.Timer.dt;
     var window = hxd.Window.getInstance();
-    ImGui.setNextWindowPos({x: window.width * 0.5, y: ImGui.getFrameHeight() + NOTICE_MARGIN * interfaceScale}, 0, {x: 0.5, y: 0});
+    ImGui.setNextWindowPos({x: window.width * 0.5, y: viewport.toolbarBottom + NOTICE_MARGIN * interfaceScale}, 0, {x: 0.5, y: 0});
     var flags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoInputs
       | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoDocking;
     if (ImGui.begin("##notice", null, flags)) ImGui.textColored(noticeIsError ? ERROR_COLOR : SUCCESS_COLOR, notice);
     ImGui.end();
+  }
+
+  function drawPopups() {
+    if (openDirtyPopup) ImGui.openPopup(DIRTY_POPUP);
+    if (openSaveAsPopup) ImGui.openPopup(SAVE_AS_POPUP);
+    if (document.hasRecovery && !ImGui.isPopupOpen(RECOVERY_POPUP)) ImGui.openPopup(RECOVERY_POPUP);
+    openDirtyPopup = false;
+    openSaveAsPopup = false;
+    var flags = ImGuiWindowFlags.AlwaysAutoResize;
+
+    if (ImGui.beginPopupModal(DIRTY_POPUP, null, flags)) {
+      ImGui.text('${document.path} kaydedilmedi.');
+      if (ImGui.button("Kaydet ve devam et")) finishGuard(document.save());
+      ImGui.sameLine();
+      if (ImGui.button("Kaydetmeden devam et")) {
+        document.removeAutosave();
+        finishGuard(true);
+      }
+      ImGui.sameLine();
+      if (ImGui.button("Vazgeç")) finishGuard(false);
+      ImGui.endPopup();
+    }
+
+    if (ImGui.beginPopupModal(SAVE_AS_POPUP, null, flags)) {
+      if (ImGui.isWindowAppearing()) ImGui.setKeyboardFocusHere();
+      var name = saveAsName;
+      if (ImGui.inputText("Sahne adı", name)) saveAsName = name;
+      if (ImGui.button("Kaydet") && document.saveAs(saveAsName)) ImGui.closeCurrentPopup();
+      ImGui.sameLine();
+      if (ImGui.button("Vazgeç")) ImGui.closeCurrentPopup();
+      ImGui.endPopup();
+    }
+
+    if (ImGui.beginPopupModal(RECOVERY_POPUP, null, flags)) {
+      ImGui.text('${document.path} için kaydedilmemiş bir otomatik yedek bulundu.');
+      if (ImGui.button("Yedeği aç")) {
+        document.recover();
+        ImGui.closeCurrentPopup();
+      }
+      ImGui.sameLine();
+      if (ImGui.button("Yedeği sil")) {
+        document.discardRecovery();
+        ImGui.closeCurrentPopup();
+      }
+      ImGui.endPopup();
+    }
+  }
+
+  function finishGuard(proceed : Bool) {
+    var action = pendingAction;
+    pendingAction = null;
+    ImGui.closeCurrentPopup();
+    if (proceed && action != null) action();
   }
 
   function drawDockSpace() {
@@ -211,9 +360,15 @@ class Editor {
     var dock = ImGui.getID("main-dock");
     if (layoutPending) {
       layoutPending = false;
+      showAssets = true;
       buildDefaultLayout(dock, width, height);
     }
     ImGui.dockSpace(dock, null, ImGuiDockNodeFlags.PassthruCentralNode);
+    var center = ImGui.dockBuilderGetCentralNode(dock);
+    if (center != null) {
+      centerX = center.Pos.x;
+      centerY = center.Pos.y;
+    }
     ImGui.end();
   }
 
@@ -227,110 +382,22 @@ class Editor {
     ImGui.dockBuilderSplitNode(center, ImGuiDir.Down, 0.25, bottom, center);
     ImGui.dockBuilderDockWindow(HIERARCHY, left);
     ImGui.dockBuilderDockWindow(INSPECTOR, right);
-    ImGui.dockBuilderDockWindow(ASSETS, bottom);
     ImGui.dockBuilderDockWindow(WARNINGS, bottom);
+    ImGui.dockBuilderDockWindow(ASSETS, bottom);
     ImGui.dockBuilderFinish(dock);
   }
 
   function drawWarnings() {
-    if (scene.warnings.length == 0) ImGui.textDisabled("Uyarı yok");
-    for (warning in scene.warnings) ImGui.text(warning);
-  }
-
-  function drawHierarchy() {
-    for (entity in scene.entities) if (entity.parent == null) drawEntity(entity);
-  }
-
-  function drawEntity(entity : Entity) {
-    var flags = ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.SpanAvailWidth;
-    if (entity == selected) flags |= ImGuiTreeNodeFlags.Selected;
-    if (entity.children.length == 0) flags |= ImGuiTreeNodeFlags.Leaf;
-    var open = ImGui.treeNodeEx(entity.id, flags, entity.name);
-    if (ImGui.isItemClicked()) selected = entity;
-    if (!open) return;
-    for (child in entity.children) drawEntity(child);
-    ImGui.treePop();
-  }
-
-  function drawInspector() {
-    if (selected == null) {
-      ImGui.textDisabled("Bir nesne seç");
-      return;
+    if (document.warningCount() == 0 && messages.length == 0) ImGui.textDisabled("Uyarı yok");
+    for (i in 0...document.issues.length) {
+      var issue = document.issues[i];
+      if (!ImGui.selectable(issue.message + "##" + i) || !scene.contains(issue.entity)) continue;
+      selection.set([issue.entity]);
+      hierarchy.reveal(issue.entity);
     }
-    var entity = selected;
-    drawName(entity);
-    if (ImGui.collapsingHeader("Dönüşüm", ImGuiTreeNodeFlags.DefaultOpen)) drawTransform(entity);
-    for (component in entity.components) {
-      var name = component.componentId();
-      if (!ImGui.collapsingHeader(name, ImGuiTreeNodeFlags.DefaultOpen)) continue;
-      ImGui.pushID(name);
-      for (field in component.describeFields()) drawField(component, field);
-      ImGui.popID();
-    }
-  }
-
-  function drawName(entity : Entity) {
-    var name = entity.name;
-    var edited = ImGui.inputText("Ad", name);
-    if (ImGui.isItemActivated()) editStart = entity.name;
-    if (edited) entity.name = name;
-    if (ImGui.isItemDeactivatedAfterEdit()) commands.execute(new SetNameCommand(entity, editStart, name));
-  }
-
-  function drawTransform(entity : Entity) {
-    drag(entity, "Konum X", entity.x, 0.1, v -> entity.setPosition(v, entity.y, entity.z));
-    drag(entity, "Konum Y", entity.y, 0.1, v -> entity.setPosition(entity.x, v, entity.z));
-    drag(entity, "Konum Z", entity.z, 0.1, v -> entity.setPosition(entity.x, entity.y, v));
-    drag(entity, "Dönüş X", entity.rotX, 1, v -> entity.setRotation(v, entity.rotY, entity.rotZ));
-    drag(entity, "Dönüş Y", entity.rotY, 1, v -> entity.setRotation(entity.rotX, v, entity.rotZ));
-    drag(entity, "Dönüş Z", entity.rotZ, 1, v -> entity.setRotation(entity.rotX, entity.rotY, v));
-    drag(entity, "Ölçek X", entity.scaleX, 0.01, v -> entity.setScale(v, entity.scaleY, entity.scaleZ));
-    drag(entity, "Ölçek Y", entity.scaleY, 0.01, v -> entity.setScale(entity.scaleX, v, entity.scaleZ));
-    drag(entity, "Ölçek Z", entity.scaleZ, 0.01, v -> entity.setScale(entity.scaleX, entity.scaleY, v));
-  }
-
-  function drag(entity : Entity, label : String, value : Float, speed : Float, apply : Float->Void) {
-    var edited = ImGui.dragDouble(label, value, speed);
-    if (ImGui.isItemActivated()) transformStart = SetTransformCommand.capture(entity);
-    if (edited) apply(value);
-    if (ImGui.isItemDeactivatedAfterEdit())
-      commands.execute(new SetTransformCommand(entity, transformStart, SetTransformCommand.capture(entity)));
-  }
-
-  function drawField(component : Component, field : FieldInfo) {
-    var label = field.label + "##" + field.name;
-    var before : Dynamic = component.readField(field.name);
-    switch (field.kind) {
-      case KFloat:
-        var value : Float = before;
-        var low : Float = field.min == null ? 0 : field.min;
-        var high : Float = field.max == null ? 0 : field.max;
-        var edited = ImGui.dragDouble(label, value, 0.1, low, high);
-        trackEdit(component, field, before, value, edited);
-      case KInt:
-        var value : Int = before;
-        var edited = ImGui.inputInt(label, value);
-        trackEdit(component, field, before, value, edited);
-      case KString:
-        var value : String = before;
-        var edited = ImGui.inputText(label, value);
-        trackEdit(component, field, before, value, edited);
-      case KBool:
-        var value : Bool = before;
-        if (ImGui.checkbox(label, value))
-          commands.execute(new SetFieldCommand(component, field.name, before, value, field.label));
-    }
-  }
-
-  // Sürükleme boyunca değer canlı uygulanır, undo'ya tek adım olarak bırakınca girer.
-  function trackEdit(component : Component, field : FieldInfo, before : Dynamic, value : Dynamic, edited : Bool) {
-    if (ImGui.isItemActivated()) editStart = before;
-    if (edited) {
-      component.writeField(field.name, value);
-      component.refresh();
-    }
-    if (ImGui.isItemDeactivatedAfterEdit())
-      commands.execute(new SetFieldCommand(component, field.name, editStart, value, field.label));
+    for (warning in scene.warnings) ImGui.textWrapped(warning);
+    for (message in messages) ImGui.textWrapped(message);
+    if (messages.length > 0 && ImGui.smallButton("Temizle")) messages = [];
   }
 
   // ImGui kırpmayı ham pikselle yapar, bu yüzden 2D sahneler gibi yakınlaştırılamaz: font ve boşluklar büyür.
@@ -354,9 +421,5 @@ class Editor {
     fontTexture = Texture.fromPixels(new hxd.Pixels(data.width, data.height, bytes, hxd.PixelFormat.RGBA));
     fonts.setTexId(fontTexture);
     fonts.clearTexData();
-  }
-
-  function get_wantsKeyboard() {
-    return ImGui.getIO().WantCaptureKeyboard || isCommandHeld();
   }
 }

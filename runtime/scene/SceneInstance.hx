@@ -2,6 +2,19 @@ package scene;
 
 import scene.data.SceneData;
 
+// Sahneden ayrılmış alt ağaç. attach aynı nesneleri aynı sıraya geri koyar.
+typedef DetachedEntity = {
+  var entity : Entity;
+  var parent : Null<Entity>;
+  var childIndex : Int;
+  var slots : Array<EntitySlot>;
+}
+
+typedef EntitySlot = {
+  var entity : Entity;
+  var index : Int;
+}
+
 // Yüklenmiş sahne. Dosya verisini canlı nesnelere çevirir ve geri yazar.
 @:allow(scene)
 class SceneInstance {
@@ -42,10 +55,55 @@ class SceneInstance {
 
   public function destroyEntity(entity : Entity) {
     for (child in entity.children.copy()) destroyEntity(child);
-    for (component in entity.components) component.onDestroy();
+    for (component in entity.components) destroyComponent(component);
     entity.setParent(null);
     entity.object.remove();
     entities.remove(entity);
+  }
+
+  // Silme geri alınabilsin diye nesne yok edilmez: komutlar aynı nesneyi tutmaya devam eder.
+  public function detach(entity : Entity) : DetachedEntity {
+    var slots = [];
+    collect(entity, slots);
+    for (slot in slots) for (component in slot.entity.components) destroyComponent(component);
+    for (slot in slots) {
+      slot.index = entities.indexOf(slot.entity);
+      entities.remove(slot.entity);
+    }
+    var parent = entity.parent;
+    var childIndex = parent == null ? 0 : parent.children.indexOf(entity);
+    if (parent != null) parent.children.remove(entity);
+    entity.object.remove();
+    return {entity: entity, parent: parent, childIndex: childIndex, slots: slots};
+  }
+
+  public function attach(detached : DetachedEntity) {
+    var slots = detached.slots;
+    var i = slots.length;
+    // Çıkarıldığı sıranın tersiyle eklenir, böylece her nesne eski sırasına döner.
+    while (i-- > 0) entities.insert(slots[i].index, slots[i].entity);
+    if (detached.parent != null) detached.parent.children.insert(detached.childIndex, detached.entity);
+    (detached.parent == null ? root : detached.parent.object).addChild(detached.entity.object);
+    for (slot in slots) for (component in slot.entity.components) createComponent(component);
+  }
+
+  public function contains(entity : Entity) {
+    return entities.indexOf(entity) >= 0;
+  }
+
+  // Editörde bozuk bir asset tüm sahneyi düşürmesin, uyarı olarak görünsün.
+  public function createComponent(component : Component) {
+    if (mode == Game) component.onCreate();
+    else try component.onCreate() catch (e : Dynamic) warn('${component.entity.name}: ${component.componentId()} kurulamadı: $e');
+    component.entity.syncVisuals(component);
+  }
+
+  public function destroyComponent(component : Component) {
+    if (mode == Game) {
+      component.onDestroy();
+      return;
+    }
+    try component.onDestroy() catch (e : Dynamic) warn('${component.entity.name}: ${component.componentId()} kapatılamadı: $e');
   }
 
   public function clear() {
@@ -56,8 +114,17 @@ class SceneInstance {
 
   public function load(data : SceneData) {
     clear();
-    for (item in data.entities) {
+    instantiate(data.entities);
+    if (mode == Game) for (warning in warnings) Sys.println('Sahne uyarısı: $warning');
+  }
+
+  // Dosyadaki, panodaki veya çoğaltılan nesneleri sahneye ekler.
+  public function instantiate(items : Array<EntityData>) : Array<Entity> {
+    isReady = false;
+    var created = [];
+    for (item in items) {
       var entity = createEntity(item.name, item.id);
+      created.push(entity);
       entity.setPosition(item.position[0], item.position[1], item.position[2]);
       entity.setRotation(item.rotation[0], item.rotation[1], item.rotation[2]);
       entity.setScale(item.scale[0], item.scale[1], item.scale[2]);
@@ -65,26 +132,31 @@ class SceneInstance {
     }
 
     // Üst nesne dosyada alttan sonra gelebilir, bu yüzden bağlar ayrı geçişte kurulur.
-    for (item in data.entities) {
+    for (i in 0...items.length) {
+      var item = items[i];
       if (item.parent == null) continue;
       var parent = find(item.parent);
       if (parent == null) warnings.push('${item.name}: üst nesne bulunamadı (${item.parent})');
-      else find(item.id).setParent(parent);
+      else created[i].setParent(parent);
     }
 
-    for (item in data.entities) {
-      var entity = find(item.id);
-      for (saved in item.components) loadComponent(entity, saved);
-    }
+    for (i in 0...items.length) for (saved in items[i].components) loadComponent(created[i], saved);
 
     isReady = true;
-    for (entity in entities) for (component in entity.components) component.onCreate();
-    if (mode == Game) for (warning in warnings) Sys.println('Sahne uyarısı: $warning');
+    for (entity in created) for (component in entity.components) createComponent(component);
+    return created;
   }
 
   public function toData() : SceneData {
     var data = new SceneData(scene.data.SceneFormat.VERSION);
     for (entity in entities) data.entities.push(saveEntity(entity));
+    return data;
+  }
+
+  // Nesne ve tüm alt nesneleri, sahnedeki sırasıyla.
+  public function toDataOf(selected : Array<Entity>) : SceneData {
+    var data = new SceneData(scene.data.SceneFormat.VERSION);
+    for (entity in entities) if (Lambda.exists(selected, root -> entity.isInside(root))) data.entities.push(saveEntity(entity));
     return data;
   }
 
@@ -99,6 +171,15 @@ class SceneInstance {
       if (!entity.active) continue;
       for (component in entity.components) component.onUpdate(dt);
     }
+  }
+
+  function collect(entity : Entity, slots : Array<EntitySlot>) {
+    slots.push({entity: entity, index: 0});
+    for (child in entity.children) collect(child, slots);
+  }
+
+  function warn(message : String) {
+    if (warnings.indexOf(message) < 0) warnings.push(message);
   }
 
   function loadComponent(entity : Entity, saved : ComponentData) {

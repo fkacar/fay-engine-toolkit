@@ -8,6 +8,8 @@ class CommandStack {
   public var redoCount(get, never) : Int;
   public var nextUndoLabel(get, never) : Null<String>;
   public var nextRedoLabel(get, never) : Null<String>;
+  // Sahnenin içeriği her değiştiğinde farklılaşır: otomatik yedek buna bakar.
+  public var revision(get, never) : Int;
 
   var done : Array<Command> = [];
   var undone : Array<Command> = [];
@@ -47,12 +49,21 @@ class CommandStack {
     savedVersion = version;
   }
 
+  // Otomatik yedekten dönen sahne diskteki dosyadan farklıdır.
+  public function markUnsaved() {
+    savedVersion = -1;
+  }
+
   public function clear() {
     done = [];
     undone = [];
     history = [];
     version = 0;
     savedVersion = 0;
+  }
+
+  function get_revision() {
+    return version;
   }
 
   function get_canUndo() {

@@ -1,0 +1,222 @@
+package scene.editor;
+
+import scene.data.SceneData;
+import scene.data.SceneFormat;
+import scene.editor.Validator.Issue;
+import sys.FileSystem;
+import sys.io.File;
+
+// Açık sahne dosyası: kaydetme, açma, son açılanlar, otomatik yedek ve kurtarma.
+class SceneDocument {
+  static inline var SCENE_DIRECTORY = "res/scenes";
+  static inline var SCENE_SUFFIX = ".scene.json";
+  static inline var NEW_SCENE_NAME = "yeni";
+  static inline var AUTOSAVE_DIRECTORY = EditorPrefs.DIRECTORY + "/autosave";
+  static inline var AUTOSAVE_SECONDS = 60.;
+
+  public var path(default, null) : String;
+  public var lastSaved(default, null) = "";
+  public var issues(default, null) : Array<Issue> = [];
+  public var prefs(default, null) = new EditorPrefs();
+  public var hasRecovery(default, null) = false;
+
+  var editor : Editor;
+  var scene : SceneInstance;
+  var autosaveTimer = 0.;
+  var autosavedRevision = 0;
+
+  public function new(editor : Editor, scene : SceneInstance, path : String) {
+    this.editor = editor;
+    this.scene = scene;
+    this.path = path;
+    applyHidden();
+    hasRecovery = isRecoverable();
+  }
+
+  public function save() {
+    try {
+      File.saveContent(path, SceneFormat.write(scene.toData()));
+    } catch (e : Dynamic) {
+      editor.show('Kaydedilemedi: $e', true);
+      return false;
+    }
+    editor.commands.markSaved();
+    removeAutosave();
+    prefs.addRecent(path);
+    lastSaved = DateTools.format(Date.now(), "%H:%M:%S");
+    validate();
+    var count = warningCount();
+    editor.show(count == 0 ? 'Kaydedildi: $path' : 'Kaydedildi: $path ($count uyarı)', false);
+    return true;
+  }
+
+  public function saveAs(name : String) {
+    var clean = cleanName(name);
+    if (clean == "") {
+      editor.show("Geçerli bir sahne adı yaz", true);
+      return false;
+    }
+    var target = '$SCENE_DIRECTORY/$clean$SCENE_SUFFIX';
+    if (target != path && FileSystem.exists(target)) {
+      editor.show('Bu adda bir sahne var: $clean', true);
+      return false;
+    }
+    path = target;
+    return save();
+  }
+
+  public function open(target : String) {
+    try {
+      scene.load(SceneFormat.read(File.getContent(target)));
+    } catch (e : Dynamic) {
+      editor.show('Açılamadı: $e', true);
+      prefs.removeRecent(target);
+      return;
+    }
+    path = target;
+    prefs.addRecent(target);
+    loaded('Açıldı: $target');
+  }
+
+  public function reopen() {
+    open(path);
+  }
+
+  public function newScene() {
+    scene.load(new SceneData(SceneFormat.VERSION));
+    path = freeName();
+    loaded('Yeni sahne: $path');
+  }
+
+  public function sceneFiles() : Array<String> {
+    if (!FileSystem.exists(SCENE_DIRECTORY)) return [];
+    var names = FileSystem.readDirectory(SCENE_DIRECTORY).filter(name -> StringTools.endsWith(name, SCENE_SUFFIX));
+    names.sort(Reflect.compare);
+    return [for (name in names) '$SCENE_DIRECTORY/$name'];
+  }
+
+  public function recover() {
+    try {
+      scene.load(SceneFormat.read(File.getContent(autosavePath())));
+    } catch (e : Dynamic) {
+      editor.show('Yedek açılamadı: $e', true);
+      discardRecovery();
+      return;
+    }
+    loaded("Otomatik yedekten dönüldü, kaydetmeyi unutma");
+    hasRecovery = false;
+    editor.commands.markUnsaved();
+  }
+
+  public function discardRecovery() {
+    removeAutosave();
+    hasRecovery = false;
+  }
+
+  public function rememberHidden() {
+    prefs.setHidden(path, [for (entity in scene.entities) if (entity.hiddenInEditor) entity.id]);
+  }
+
+  public function showAll() {
+    for (entity in scene.entities) if (entity.hiddenInEditor) entity.hiddenInEditor = false;
+    rememberHidden();
+  }
+
+  public function validate() {
+    issues = editor.validator.run(scene);
+  }
+
+  public function warningCount() {
+    return issues.length + scene.warnings.length;
+  }
+
+  public function update(dt : Float) {
+    autosaveTimer += dt;
+    if (autosaveTimer < AUTOSAVE_SECONDS) return;
+    autosaveTimer = 0;
+    var commands = editor.commands;
+    if (!commands.isDirty || commands.revision == autosavedRevision) return;
+    try {
+      if (!FileSystem.exists(AUTOSAVE_DIRECTORY)) FileSystem.createDirectory(AUTOSAVE_DIRECTORY);
+      File.saveContent(autosavePath(), SceneFormat.write(scene.toData()));
+      autosavedRevision = commands.revision;
+    } catch (e : Dynamic) {
+      editor.show('Otomatik yedek alınamadı: $e', true);
+    }
+  }
+
+  // Oyuna geçerken yol `res` köküne göre verilir: Heaps kaynakları böyle bulur.
+  public function resourcePath() {
+    return StringTools.startsWith(path, "res/") ? path.substr(4) : path;
+  }
+
+  public function removeAutosave() {
+    if (FileSystem.exists(autosavePath())) FileSystem.deleteFile(autosavePath());
+  }
+
+  function loaded(message : String) {
+    editor.selection.clear();
+    editor.commands.clear();
+    lastSaved = "";
+    issues = [];
+    autosaveTimer = 0;
+    autosavedRevision = 0;
+    applyHidden();
+    validate();
+    hasRecovery = isRecoverable();
+    editor.show(message);
+  }
+
+  function applyHidden() {
+    for (id in prefs.hiddenIn(path)) {
+      var entity = scene.find(id);
+      if (entity != null) entity.hiddenInEditor = true;
+    }
+  }
+
+  function autosavePath() {
+    return AUTOSAVE_DIRECTORY + "/" + haxe.io.Path.withoutDirectory(path);
+  }
+
+  // Yedek sahneden yeniyse editör kapanmadan önce kaydedilmemiş iş kalmıştır.
+  function isRecoverable() {
+    if (!FileSystem.exists(autosavePath())) return false;
+    if (!FileSystem.exists(path)) return true;
+    return FileSystem.stat(autosavePath()).mtime.getTime() > FileSystem.stat(path).mtime.getTime();
+  }
+
+  function freeName() {
+    var candidate = '$SCENE_DIRECTORY/$NEW_SCENE_NAME$SCENE_SUFFIX';
+    var index = 2;
+    while (FileSystem.exists(candidate)) candidate = '$SCENE_DIRECTORY/$NEW_SCENE_NAME-${index++}$SCENE_SUFFIX';
+    return candidate;
+  }
+
+  // Dosya adı her sistemde ve komut satırında sorunsuz olmalı.
+  public static function cleanName(name : String) {
+    var out = new StringBuf();
+    for (i in 0...name.length) {
+      var code = StringTools.fastCodeAt(name, i);
+      var text = name.charAt(i);
+      out.add(switch (text) {
+        case "ç", "Ç": "c";
+        case "ğ", "Ğ": "g";
+        case "ı", "I", "İ": "i";
+        case "ö", "Ö": "o";
+        case "ş", "Ş": "s";
+        case "ü", "Ü": "u";
+        case " ", "-", "_", "+", ".": "_";
+        default: isPlain(code) ? text.toLowerCase() : "";
+      });
+    }
+    var clean = out.toString();
+    while (clean.indexOf("__") >= 0) clean = StringTools.replace(clean, "__", "_");
+    while (StringTools.startsWith(clean, "_")) clean = clean.substr(1);
+    while (StringTools.endsWith(clean, "_")) clean = clean.substr(0, clean.length - 1);
+    return clean;
+  }
+
+  static function isPlain(code : Int) {
+    return (code >= "a".code && code <= "z".code) || (code >= "A".code && code <= "Z".code) || (code >= "0".code && code <= "9".code);
+  }
+}

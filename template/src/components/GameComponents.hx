@@ -7,6 +7,7 @@ class GameComponents {
   public static function registry() {
     var types = new ComponentRegistry();
     types.register(BoxComponent);
+    types.register(ModelComponent);
     return types;
   }
 }

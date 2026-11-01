@@ -7,7 +7,10 @@ import scene.data.SceneData.ComponentData;
 class Entity {
   public var id(default, null) : String;
   public var name : String;
+  // Oyunda görünür mü: dosyaya yazılır. Editörde görünürlüğü etkilemez, nesne düzenlenebilir kalır.
   public var active(default, set) = true;
+  // Yalnızca editörde, kişiye özel: dosyaya yazılmaz, oyunu etkilemez.
+  public var hiddenInEditor(default, set) = false;
   public var scene(default, null) : SceneInstance;
   public var parent(default, null) : Null<Entity>;
   public var children(default, null) : Array<Entity> = [];
@@ -62,11 +65,37 @@ class Entity {
     (parent == null ? scene.root : parent.object).addChild(object);
   }
 
-  public function addComponent<T:Component>(component : T) : T {
+  public function addComponent<T:Component>(component : T, ?index : Int) : T {
     component.entity = this;
-    components.push(component);
-    if (scene.isReady) component.onCreate();
+    if (index == null) components.push(component);
+    else components.insert(index, component);
+    if (scene.isReady) scene.createComponent(component);
     return component;
+  }
+
+  public function removeComponent(component : Component) {
+    components.remove(component);
+    scene.destroyComponent(component);
+  }
+
+  // Kendisi de sayılır: bir nesne kendi altına taşınamaz.
+  // Üst nesneler de sayılır: gizlenen nesnenin alt nesneleri de görünmez.
+  public function isShown() {
+    var current = this;
+    while (current != null) {
+      if (!current.isVisibleItself()) return false;
+      current = current.parent;
+    }
+    return true;
+  }
+
+  public function isInside(other : Entity) {
+    var current = this;
+    while (current != null) {
+      if (current == other) return true;
+      current = current.parent;
+    }
+    return false;
   }
 
   public function getComponent<T:Component>(type : Class<T>) : Null<T> {
@@ -88,9 +117,32 @@ class Entity {
     for (component in components) component.onEntityMoved();
   }
 
+  function isVisibleItself() {
+    return scene.mode == Editor ? !hiddenInEditor : active;
+  }
+
+  // Bileşenin nesne dışındaki görselleri (sahne köküne bağlı birimler gibi) kendiliğinden gizlenmez.
+  function applyVisibility() {
+    object.visible = isVisibleItself();
+    for (component in components) syncVisuals(component);
+    for (child in children) child.applyVisibility();
+  }
+
+  function syncVisuals(component : Component) {
+    var shown = isShown();
+    for (visual in component.visuals()) visual.visible = shown;
+  }
+
   function set_active(value : Bool) {
-    object.visible = value;
-    return active = value;
+    active = value;
+    applyVisibility();
+    return value;
+  }
+
+  function set_hiddenInEditor(value : Bool) {
+    hiddenInEditor = value;
+    applyVisibility();
+    return value;
   }
 
   static inline function radians(degrees : Float) {

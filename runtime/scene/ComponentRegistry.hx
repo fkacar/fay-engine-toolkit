@@ -23,6 +23,11 @@ class ComponentRegistry {
     return factory == null ? null : factory();
   }
 
+  // Eski kimlikler olmadan: Inspector'daki ekleme listesi için.
+  public function currentTypes() : Array<String> {
+    return types().filter(name -> create(name).componentId() == name);
+  }
+
   public function types() : Array<String> {
     var names = [for (name in factories.keys()) name];
     names.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);

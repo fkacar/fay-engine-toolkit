@@ -5,3 +5,4 @@ res/.tmp/
 .DS_Store
 Thumbs.db
 imgui.ini
+.editor/

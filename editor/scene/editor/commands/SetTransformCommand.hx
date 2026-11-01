@@ -23,6 +23,18 @@ class SetTransformCommand implements Command {
     };
   }
 
+  public static function apply(entity : Entity, state : Transform) {
+    entity.setPosition(state.position[0], state.position[1], state.position[2]);
+    entity.setRotation(state.rotation[0], state.rotation[1], state.rotation[2]);
+    entity.setScale(state.scale[0], state.scale[1], state.scale[2]);
+  }
+
+  // Değişmeyen sürüklemeler undo'ya girmesin.
+  public static function same(a : Transform, b : Transform) {
+    return a.position.toString() == b.position.toString() && a.rotation.toString() == b.rotation.toString()
+      && a.scale.toString() == b.scale.toString();
+  }
+
   public function new(entity : Entity, before : Transform, after : Transform) {
     this.entity = entity;
     this.before = before;
@@ -30,16 +42,10 @@ class SetTransformCommand implements Command {
   }
 
   public function execute() {
-    apply(after);
+    apply(entity, after);
   }
 
   public function undo() {
-    apply(before);
-  }
-
-  function apply(state : Transform) {
-    entity.setPosition(state.position[0], state.position[1], state.position[2]);
-    entity.setRotation(state.rotation[0], state.rotation[1], state.rotation[2]);
-    entity.setScale(state.scale[0], state.scale[1], state.scale[2]);
+    apply(entity, before);
   }
 }

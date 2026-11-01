@@ -1,15 +1,28 @@
 import h3d.scene.Object;
 import scene.Component;
 import scene.ComponentRegistry;
+import scene.FieldInfo.FieldHint;
 import scene.FieldInfo.FieldKind;
 import scene.Guid;
+import scene.PlayOptions;
 import scene.SceneInstance;
 import scene.data.SceneData;
 import scene.data.SceneFormat;
 import scene.data.SceneSchema;
 import scene.editor.CommandStack;
+import scene.editor.GizmoMath;
+import scene.editor.Selection;
+import scene.editor.Validator;
+import scene.editor.Vec3;
+import scene.editor.commands.AddComponentCommand;
+import scene.editor.commands.AddEntitiesCommand;
+import scene.editor.commands.GroupCommand;
+import scene.editor.commands.RemoveComponentCommand;
+import scene.editor.commands.RemoveEntitiesCommand;
+import scene.editor.commands.SetActiveCommand;
 import scene.editor.commands.SetFieldCommand;
 import scene.editor.commands.SetNameCommand;
+import scene.editor.commands.SetParentCommand;
 import scene.editor.commands.SetTransformCommand;
 
 @:component("crate")
@@ -51,6 +64,38 @@ class HeavyCrate extends Crate {
 @:formerly("old_barrel")
 class Barrel extends Component {
   @:editable @:formerly("cap", "volume_l") public var capacity : Float = 1;
+}
+
+@:component("pointer")
+class Pointer extends Component {
+  @:editable("Model") @:asset public var model : String = "";
+  @:editable("Hedef") @:entity public var target : String = "";
+}
+
+// Bozuk asset gibi davranır: kurulumda hata verir.
+@:component("broken")
+class Broken extends Component {
+  override function onCreate() {
+    throw "dosya bozuk";
+  }
+}
+
+// Görseli nesnenin altında değil, sahne kökündedir.
+@:component("walker")
+class Walker extends Component {
+  public var body : Object;
+
+  override function onCreate() {
+    body = new Object(entity.scene.root);
+  }
+
+  override function onDestroy() {
+    body.remove();
+  }
+
+  override public function visuals() : Array<Object> {
+    return [body];
+  }
 }
 
 class NoIdentity extends Component {}
@@ -351,6 +396,251 @@ class TestMain {
     }
   }
 
+  static function keep(entity : scene.Entity) {}
+
+  static function near(actual : Float, expected : Float, label : String, ?pos : haxe.PosInfos) {
+    check(Math.abs(actual - expected) < 1e-6, '$label: beklenen <$expected>, gelen <$actual>', pos);
+  }
+
+  static function testDetach() {
+    var scene = sample();
+    var last = scene.createEntity("Son", "cccccccccccccccc");
+    var text = SceneFormat.write(scene.toData());
+    var parent = scene.find("aaaaaaaaaaaaaaaa"), child = scene.find("bbbbbbbbbbbbbbbb");
+    var crate = child.getComponent(HeavyCrate);
+
+    var detached = scene.detach(parent);
+    equals(scene.entities.length, 1, "alt ağaç sahneden çıkmalı");
+    check(!scene.contains(child), "alt nesne de çıkmalı");
+    equals(crate.destroyed, 1, "bileşen kapanmalı");
+    equals(child.parent, parent, "alt ağaç bağı korunmalı");
+
+    scene.attach(detached);
+    equals(crate.created, 1, "bileşen yeniden kurulmalı");
+    equals(scene.find("bbbbbbbbbbbbbbbb"), child, "aynı nesne dönmeli");
+    equals(SceneFormat.write(scene.toData()), text, "geri koyma dosyayı değiştirmemeli");
+
+    var data = scene.toDataOf([parent]);
+    equals(data.entities.length, 2, "seçilen nesne alt nesneleriyle alınmalı");
+    equals(data.entities[1].parent, "aaaaaaaaaaaaaaaa", "alt nesne üst bağını korumalı");
+    keep(last);
+  }
+
+  static function testEntityCommands() {
+    var scene = sample();
+    var stack = new CommandStack();
+    var text = SceneFormat.write(scene.toData());
+    var parent = scene.find("aaaaaaaaaaaaaaaa"), child = scene.find("bbbbbbbbbbbbbbbb");
+
+    // Silinen nesneye önceki komutlar da uygulanabilmeli.
+    var before = SetTransformCommand.capture(child);
+    var after = SetTransformCommand.capture(child);
+    after.position = [9, 9, 9];
+    stack.execute(new SetTransformCommand(child, before, after));
+    stack.execute(new RemoveEntitiesCommand(scene, [parent]));
+    equals(scene.entities.length, 0, "silinmeli");
+    stack.undo();
+    stack.undo();
+    equals(child.x, 0, "silmeden önceki komut da geri alınmalı");
+    equals(SceneFormat.write(scene.toData()), text, "geri alma dosyayı değiştirmemeli");
+    stack.redo();
+    stack.redo();
+    equals(scene.entities.length, 0, "yineleme yeniden silmeli");
+    stack.undo();
+    stack.undo();
+
+    var item = SceneFormat.read(SceneFormat.write(scene.toDataOf([child]))).entities[0];
+    item.id = "dddddddddddddddd";
+    var add = new AddEntitiesCommand(scene, [item], "Çoğalt");
+    stack.execute(add);
+    var copy = scene.find("dddddddddddddddd");
+    equals(copy.parent, parent, "kopya aynı üst nesneye girmeli");
+    equals(copy.getComponent(HeavyCrate).tag, "Şığ ünlü", "kopya alanları taşımalı");
+    stack.undo();
+    check(!scene.contains(copy), "ekleme geri alınmalı");
+    equals(parent.children.length, 1, "kopya üst nesneden de çıkmalı");
+    stack.redo();
+    equals(scene.find("dddddddddddddddd"), copy, "yineleme aynı nesneyi geri koymalı");
+    stack.undo();
+    equals(SceneFormat.write(scene.toData()), text, "ekleme izi kalmamalı");
+
+    stack.execute(new SetActiveCommand(child, false));
+    check(!child.active, "oyunda kapanmalı");
+    check(child.object.visible, "editörde düzenlenebilir kalmalı");
+    stack.undo();
+    check(child.active, "göster geri gelmeli");
+
+    var other = scene.createEntity("Diğer", "eeeeeeeeeeeeeeee");
+    var place = (entity : scene.Entity) -> entity.setPosition(3, 3, 3);
+    stack.execute(new SetParentCommand(child, other, place));
+    equals(child.parent, other, "üst nesne değişmeli");
+    equals(child.x, 3, "konum korunmalı");
+    equals(parent.children.length, 0, "eski üst nesneden çıkmalı");
+    stack.undo();
+    equals(child.parent, parent, "eski üst nesneye dönmeli");
+    equals(child.x, 0, "konum geri gelmeli");
+    stack.redo();
+    equals(child.x, 3, "yineleme saklanan konumu kullanmalı");
+    stack.undo();
+    check(child.isInside(parent) && child.isInside(child) && !parent.isInside(child), "soy kontrolü");
+
+    var crate = new Crate();
+    stack.execute(new AddComponentCommand(parent, crate));
+    equals(parent.components.length, 1, "bileşen eklenmeli");
+    stack.undo();
+    equals(parent.components.length, 0, "bileşen kalkmalı");
+    equals(crate.destroyed, 1, "kaldırılan bileşen kapanmalı");
+    stack.redo();
+
+    var first = child.components[0];
+    child.addComponent(new Crate());
+    stack.execute(new RemoveComponentCommand(child, first));
+    equals(child.components.length, 1, "bileşen silinmeli");
+    stack.undo();
+    equals(child.components[0], first, "bileşen eski sırasına dönmeli");
+
+    var group = new GroupCommand("Grup", [new SetNameCommand(parent, parent.name, "A"), new SetNameCommand(child, child.name, "B")]);
+    stack.execute(group);
+    equals(child.name, "B", "grup hepsini uygulamalı");
+    stack.undo();
+    equals(child.name, "Ev \"1\"", "grup tek adımda geri alınmalı");
+  }
+
+  static function testVisibility() {
+    var editor = sample();
+    var parent = editor.find("aaaaaaaaaaaaaaaa"), child = editor.find("bbbbbbbbbbbbbbbb");
+    var text = SceneFormat.write(editor.toData());
+    parent.hiddenInEditor = true;
+    check(!parent.object.visible, "editörde gizlenmeli");
+    check(!child.isShown(), "alt nesne de görünmez sayılmalı");
+    equals(SceneFormat.write(editor.toData()), text, "editörde gizleme dosyaya yazılmamalı");
+    parent.hiddenInEditor = false;
+    check(child.isShown(), "editörde geri gelmeli");
+
+    parent.active = false;
+    check(parent.object.visible, "oyunda gizleme editörü etkilememeli");
+    check(child.isShown(), "editörde görünür kalmalı");
+    check(SceneFormat.write(editor.toData()) != text, "oyunda gizleme dosyaya yazılmalı");
+
+    var game = newScene(Game);
+    game.load(editor.toData());
+    var hidden = game.find("aaaaaaaaaaaaaaaa");
+    check(!hidden.object.visible, "oyunda kapalı olmalı");
+    check(!game.find("bbbbbbbbbbbbbbbb").isShown(), "alt nesne de kapalı olmalı");
+    hidden.hiddenInEditor = true;
+    hidden.active = true;
+    check(hidden.object.visible, "editör bayrağı oyunu etkilememeli");
+
+    var types = registry();
+    types.register(Walker);
+    var scene = new SceneInstance(types, Editor, new Object());
+    var group = scene.createEntity("Grup");
+    var member = scene.createEntity("Üye");
+    member.setParent(group);
+    @:privateAccess scene.isReady = true;
+    var walker = member.addComponent(new Walker());
+    group.hiddenInEditor = true;
+    check(!walker.body.visible, "kök görseli üst nesneyle gizlenmeli");
+    walker.refresh();
+    check(!walker.body.visible, "yeniden kurulan görsel gizli kalmalı");
+    group.hiddenInEditor = false;
+    check(walker.body.visible, "kök görseli geri gelmeli");
+  }
+
+  static function testBrokenComponent() {
+    var types = registry();
+    types.register(Broken);
+    var scene = new SceneInstance(types, Editor, new Object());
+    var entity = scene.createEntity("Bozuk");
+    @:privateAccess scene.isReady = true;
+    entity.addComponent(new Broken());
+    equals(scene.warnings.length, 1, "editörde hata uyarıya dönmeli");
+    equals(scene.warnings[0], "Bozuk: broken kurulamadı: dosya bozuk", "uyarı metni");
+    entity.components[0].refresh();
+    equals(scene.warnings.length, 1, "aynı uyarı tekrarlanmamalı");
+
+    var game = new SceneInstance(types, Game, new Object());
+    @:privateAccess game.isReady = true;
+    var failed = false;
+    try game.createEntity("Bozuk").addComponent(new Broken()) catch (e : Dynamic) failed = true;
+    check(failed, "oyunda hata gizlenmemeli");
+    equals(types.currentTypes().indexOf("old_barrel"), -1, "eski kimlik ekleme listesinde olmamalı");
+    check(types.currentTypes().indexOf("barrel") >= 0, "güncel kimlik listede olmalı");
+  }
+
+  static function testSelection() {
+    var scene = sample();
+    var parent = scene.find("aaaaaaaaaaaaaaaa"), child = scene.find("bbbbbbbbbbbbbbbb");
+    var selection = new Selection();
+    selection.set([child, parent]);
+    equals(selection.primary, parent, "son seçilen birincil");
+    equals(selection.roots().length, 1, "üstü seçili alt nesne elenmeli");
+    equals(selection.roots()[0], parent, "kök üst nesne");
+    selection.toggle(child);
+    check(!selection.has(child), "ikinci kez seçim kaldırmalı");
+    selection.add(parent);
+    equals(selection.items.length, 1, "aynı nesne iki kez girmemeli");
+    var detached = scene.detach(parent);
+    selection.purge(scene);
+    equals(selection.primary, null, "sahnede olmayan nesne seçimden çıkmalı");
+    scene.attach(detached);
+  }
+
+  static function testGizmoMath() {
+    var origin = new Vec3();
+    near(GizmoMath.axisParam(new Vec3(5, 0, 10), new Vec3(0, 0, -1), origin, new Vec3(1, 0, 0)), 5, "eksen konumu");
+    near(GizmoMath.axisParam(new Vec3(5, 3, 10), new Vec3(0, 0, -1), origin, new Vec3(0, 1, 0)), 3, "eksen konumu y");
+    equals(GizmoMath.axisParam(origin, new Vec3(1, 0, 0), new Vec3(0, 5, 0), new Vec3(1, 0, 0)), null, "paralel eksen");
+    var hit = GizmoMath.planeHit(new Vec3(1, 2, 10), new Vec3(0, 0, -1), origin, new Vec3(0, 0, 1));
+    near(hit.x, 1, "düzlem x");
+    near(hit.z, 0, "düzlem z");
+    equals(GizmoMath.planeHit(new Vec3(0, 0, 10), new Vec3(0, 0, 1), origin, new Vec3(0, 0, 1)), null, "arkadaki düzlem");
+    near(GizmoMath.snap(2.3, 0.5), 2.5, "yakalama");
+    near(GizmoMath.snap(2.3, 0), 2.3, "adım 0 değiştirmemeli");
+    near(GizmoMath.segmentDistance(5, 3, 0, 0, 10, 0), 3, "doğru parçası");
+    near(GizmoMath.segmentDistance(13, 4, 0, 0, 10, 0), 5, "uçtan uzaklık");
+    near(GizmoMath.signedAngle(new Vec3(1, 0, 0), new Vec3(0, 1, 0), new Vec3(0, 0, 1)), Math.PI / 2, "pozitif açı");
+    near(GizmoMath.signedAngle(new Vec3(1, 0, 0), new Vec3(0, -1, 0), new Vec3(0, 0, 1)), -Math.PI / 2, "negatif açı");
+  }
+
+  static function testValidator() {
+    var types = new ComponentRegistry();
+    types.register(Pointer);
+    var scene = new SceneInstance(types, Editor, new Object());
+    var entity = scene.createEntity("Ok", "aaaaaaaaaaaaaaaa");
+    @:privateAccess scene.isReady = true;
+    var pointer = entity.addComponent(new Pointer());
+    var fields = pointer.describeFields();
+    equals(fields[0].hint, FieldHint.HAsset, "asset alanı");
+    equals(fields[1].hint, FieldHint.HEntity, "nesne alanı");
+
+    var validator = new Validator(path -> path == "var.fbx");
+    equals(validator.run(scene).length, 0, "boş alan uyarı vermemeli");
+    pointer.model = "var.fbx";
+    pointer.target = "aaaaaaaaaaaaaaaa";
+    equals(validator.run(scene).length, 0, "geçerli alan uyarı vermemeli");
+    pointer.model = "yok.fbx";
+    pointer.target = "bbbbbbbbbbbbbbbb";
+    var issues = validator.run(scene);
+    equals(issues.length, 2, "iki sorun");
+    equals(issues[0].entity, entity, "sorun nesneyi göstermeli");
+    equals(issues[0].message, 'Ok: eksik asset "yok.fbx" (Model)', "asset uyarısı");
+    validator.rules.push(_ -> [{entity: entity, message: "oyun kuralı"}]);
+    equals(validator.run(scene).length, 3, "oyun kuralı eklenebilmeli");
+  }
+
+  static function testPlayOptions() {
+    equals(PlayOptions.parse([]), null, "seçenek yok");
+    equals(PlayOptions.parse(["--play"]), null, "eksik sahne");
+    var options = new PlayOptions("scenes/a.scene.json", [1, 2.5, -3, 4, 5, 6]);
+    var parsed = PlayOptions.parse(options.toArgs());
+    equals(parsed.scene, "scenes/a.scene.json", "sahne");
+    equals(parsed.camera.length, 6, "kamera");
+    near(parsed.camera[1], 2.5, "kamera değeri");
+    near(parsed.camera[2], -3, "negatif değer");
+    equals(PlayOptions.parse(new PlayOptions("x").toArgs()).camera, null, "kamera isteğe bağlı");
+  }
+
   static function testGuid() {
     var seen = new Map<String, Bool>();
     for (i in 0...2000) seen.set(Guid.make(), true);
@@ -384,6 +674,14 @@ class TestMain {
     testProjectScenes();
     testGuid();
     testDestroy();
+    testDetach();
+    testEntityCommands();
+    testVisibility();
+    testBrokenComponent();
+    testSelection();
+    testGizmoMath();
+    testValidator();
+    testPlayOptions();
     Sys.println('$checks kontrol, $failures hata');
     if (failures > 0) Sys.exit(1);
   }

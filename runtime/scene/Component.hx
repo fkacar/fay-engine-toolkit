@@ -44,10 +44,15 @@ class Component {
     return false;
   }
 
+  // Nesnenin altında olmayan görseller: seçim ve gizleme bunları da kapsar.
+  public function visuals() : Array<h3d.scene.Object> {
+    return [];
+  }
+
   // Editörde bir alan değişince görsel yeniden kurulur.
   public function refresh() {
-    onDestroy();
-    onCreate();
+    entity.scene.destroyComponent(this);
+    entity.scene.createComponent(this);
   }
 
   function onCreate() {}

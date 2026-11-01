@@ -47,6 +47,15 @@ class HouseComponent extends Component {
 
 Bileşen `ComponentRegistry.register` ile kaydedilir. Alan tipi açıkça `Float`, `Int`, `Bool` veya `String` olmalıdır.
 
+Metin alanının anlamı işaretlenirse Inspector uygun girişi gösterir, kayıt doğrulaması da bakar:
+
+```haxe
+@:editable("Model") @:asset public var path : String = "";     // Asset Browser'dan sürüklenir, dosya aranır
+@:editable("Hedef") @:entity public var target : String = "";  // Listeden seçilir, nesne aranır
+```
+
+Görseli `entity.object` altında olmayan bileşen (sahne köküne bağlı birim gibi) `visuals()` döndürür. Seçim ve gizleme bu görselleri de kapsar.
+
 ## Yeniden adlandırma
 
 Dosyada sınıf adı değil `@:component` kimliği saklanır, bu yüzden sınıfı taşımak veya yeniden adlandırmak sahneleri etkilemez.
@@ -74,6 +83,27 @@ Bir bileşen veya alan bilerek silindiyse sahne dosyası da güncellenir.
 JSON'dur ve deterministik yazılır: aynı sahne her sistemde aynı dosyayı üretir. Sayılar 5 ondalığa yuvarlanır, dönüşler derecedir, alanlar alfabetik sıralıdır. Bu derlemede tanınmayan bileşen ve alanlar silinmez, olduğu gibi geri yazılır.
 
 Biçim değişirse `SceneFormat.VERSION` artırılır ve `MIGRATIONS` listesine yükseltme eklenir.
+
+## Oyunu editöre bağlama
+
+Şablondaki `Main.hx` hazır örnektir. Oyuna özel her şey başlangıçta kaydedilir:
+
+```haxe
+editor = new Editor(level, "res/" + MAIN_SCENE);
+editor.actions.groundRay = ray -> terrain.raycast(ray);        // Verilmezse z = 0 düzlemi
+editor.actions.addAssetType("fbx", "model", "path");           // Sürüklenen dosya hangi bileşene yazılır
+editor.validator.rules.push(scene -> myIssues(scene));         // Kayıtta çalışan oyun kuralı
+editor.addPanel("Fraksiyonlar", drawFactions);                 // Oyuna özel panel
+```
+
+- `Main.render` içinde `editor.render(e)` çağrılır, model önizlemeleri orada çizilir.
+- Editör ikilisi `--play <sahne> --camera x y z x y z` ile oyun olarak açılır, `PlayOptions.parse(Sys.args())` bunu okur. "Buradan oyna" bunu kullanır, çünkü oyun derlemesi kaynakları gömülü taşır ve yeni kaydedilen sahneyi görmez.
+- Kişiye özel ayarlar `.editor/` altındadır ve git'e girmez: son açılanlar, editörde gizlenenler, otomatik yedekler.
+- Görünürlük iki ayrı durumdur. `entity.active` sahneye yazılır ve oyunu etkiler, `entity.hiddenInEditor` yalnızca o bilgisayarda geçerlidir. İkisi bağımsızdır: oyunda kapalı nesne editörde düzenlenebilir kalır.
+- İçe aktarma `assets/` altındaki FBX'i `res/models/` altına HMD olarak yazar. Oyun derlemesi FBX'i makro içinde dönüştürür ve normal map'li modelde `meshTools` ister, HMD'de bu adım yoktur. Yeni oyunun `.gitattributes` dosyasında `*.hmd` LFS'te olmalıdır.
+- Heaps'in normal map ve specular gölgelendiricisi UV'yi temel renk dokusundan alır. Temel dokusu olmayan malzeme çizimde hata verir, içe aktarıcı bu malzemelere 1x1 beyaz doku ekler. Eksik doku da Heaps'te modelin tamamını düşürür, bu yüzden modelden çıkarılıp uyarı verilir.
+- ImGui çizim listesi renkleri `0xAARRGGBB` biçimindedir.
+- hlimgui bağlamasında iki tuzak var: `selectable` sabit `true`/`false` ile çöker, değer değişkenle verilir. `getColorU32(ImGuiCol.X)` saydam döner, `getStyleColorVec4` kullanılır.
 
 ## Retina
 

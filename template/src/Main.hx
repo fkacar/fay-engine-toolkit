@@ -1,5 +1,6 @@
 import components.GameComponents;
 import scene.HiDpi;
+import scene.PlayOptions;
 import scene.SceneInstance;
 import scene.SceneMode;
 import scene.data.SceneFormat;
@@ -28,23 +29,42 @@ class Main extends #if scene_editor imgui.ImGuiApp #else hxd.App #end {
     s3d.camera.pos.set(8, 8, 6);
     s3d.camera.target.set(0, 0, 0);
 
-    var mode = #if scene_editor SceneMode.Editor #else SceneMode.Game #end;
-    level = new SceneInstance(GameComponents.registry(), mode, s3d);
-    level.load(SceneFormat.read(hxd.Res.load(MAIN_SCENE).toText()));
+    // Editör ikilisi `--play` ile oyun olarak açılır: "Buradan oyna" böyle çalışır.
+    var play = PlayOptions.parse(Sys.args());
+    var editing = #if scene_editor play == null #else false #end;
+    level = new SceneInstance(GameComponents.registry(), editing ? SceneMode.Editor : SceneMode.Game, s3d);
+    level.load(SceneFormat.read(hxd.Res.load(play == null ? MAIN_SCENE : play.scene).toText()));
 
     #if scene_editor
-    editor = new Editor(level, "res/" + MAIN_SCENE);
-    #else
-    level.start();
+    if (editing) {
+      editor = new Editor(level, "res/" + MAIN_SCENE);
+      editor.actions.addAssetType("fbx", "model", "path");
+      editor.actions.addAssetType("hmd", "model", "path");
+      return;
+    }
     #end
+    level.start();
+    if (play != null && play.camera != null) {
+      s3d.camera.pos.set(play.camera[0], play.camera[1], play.camera[2]);
+      s3d.camera.target.set(play.camera[3], play.camera[4], play.camera[5]);
+    }
   }
+
+  #if scene_editor
+  override function render(e : h3d.Engine) {
+    if (editor != null) editor.render(e);
+    super.render(e);
+  }
+  #end
 
   override function update(dt : Float) {
     #if scene_editor
-    editor.draw();
-    #else
-    level.update(dt);
+    if (editor != null) {
+      editor.draw();
+      return;
+    }
     #end
+    level.update(dt);
   }
 
   static function main() {
