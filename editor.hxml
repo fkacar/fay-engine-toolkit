@@ -1,0 +1,4 @@
+-cp libs/scene-toolkit/editor
+-cp libs/scene-toolkit/third_party/hlimgui
+-D hlimgui
+-D scene_editor

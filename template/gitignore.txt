@@ -1,0 +1,7 @@
+bin/
+.haxelib/
+.hashlink/
+res/.tmp/
+.DS_Store
+Thumbs.db
+imgui.ini

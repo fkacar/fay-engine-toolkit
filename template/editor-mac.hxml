@@ -1,0 +1,4 @@
+common.hxml
+libs/scene-toolkit/editor.hxml
+-D no-compilation
+-hl bin/editor-c/main.c

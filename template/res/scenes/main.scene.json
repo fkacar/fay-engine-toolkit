@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "entities": [
+    {
+      "id": "0000000000000001",
+      "name": "Kutu",
+      "position": [0, 0, 0],
+      "rotation": [0, 0, 0],
+      "scale": [1, 1, 1],
+      "components": [
+        {
+          "type": "box",
+          "fields": {
+            "color": 13214586,
+            "size": 2
+          }
+        }
+      ]
+    }
+  ]
+}

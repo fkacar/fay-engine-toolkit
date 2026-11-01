@@ -1,0 +1,3 @@
+common.hxml
+libs/scene-toolkit/editor.hxml
+-hl bin/editor.hl

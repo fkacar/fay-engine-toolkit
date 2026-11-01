@@ -1,0 +1,11 @@
+-cp src
+libs/scene-toolkit/runtime.hxml
+-lib heaps:2.1.0
+-lib format:3.8.0
+-lib hlsdl:1.16.0
+-main Main
+--macro scene.macro.SceneCheck.run("res/scenes")
+-D analyzer-optimize
+-D windowSize=1280x720
+-D windowTitle=Yeni Oyun
+-debug
