@@ -29,7 +29,7 @@ class SceneDocument {
     this.editor = editor;
     this.scene = scene;
     this.path = path;
-    applyHidden();
+    applyFlags();
     hasRecovery = isRecoverable();
   }
 
@@ -113,13 +113,15 @@ class SceneDocument {
     hasRecovery = false;
   }
 
-  public function rememberHidden() {
-    prefs.setHidden(path, [for (entity in scene.entities) if (entity.hiddenInEditor) entity.id]);
+  public function rememberFlags() {
+    var hidden = [for (entity in scene.entities) if (entity.hiddenInEditor) entity.id];
+    var locked = [for (entity in scene.entities) if (entity.lockedInEditor) entity.id];
+    prefs.setFlags(path, hidden, locked);
   }
 
   public function showAll() {
     for (entity in scene.entities) if (entity.hiddenInEditor) entity.hiddenInEditor = false;
-    rememberHidden();
+    rememberFlags();
   }
 
   public function validate() {
@@ -161,16 +163,20 @@ class SceneDocument {
     issues = [];
     autosaveTimer = 0;
     autosavedRevision = 0;
-    applyHidden();
+    applyFlags();
     validate();
     hasRecovery = isRecoverable();
     editor.show(message);
   }
 
-  function applyHidden() {
+  function applyFlags() {
     for (id in prefs.hiddenIn(path)) {
       var entity = scene.find(id);
       if (entity != null) entity.hiddenInEditor = true;
+    }
+    for (id in prefs.lockedIn(path)) {
+      var entity = scene.find(id);
+      if (entity != null) entity.lockedInEditor = true;
     }
   }
 

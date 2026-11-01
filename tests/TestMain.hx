@@ -595,6 +595,12 @@ class TestMain {
     near(hit.x, 1, "düzlem x");
     near(hit.z, 0, "düzlem z");
     equals(GizmoMath.planeHit(new Vec3(0, 0, 10), new Vec3(0, 0, 1), origin, new Vec3(0, 0, 1)), null, "arkadaki düzlem");
+    var a = new Vec3(0, 0, 0), b = new Vec3(2, 0, 0), c = new Vec3(0, 2, 0);
+    near(GizmoMath.rayTriangle(new Vec3(0.5, 0.5, 5), new Vec3(0, 0, -1), a, b, c), 5, "üçgene çarpar");
+    near(GizmoMath.rayTriangle(new Vec3(0.5, 0.5, -5), new Vec3(0, 0, 1), a, b, c), 5, "arka yüz de sayılır");
+    equals(GizmoMath.rayTriangle(new Vec3(1.5, 1.5, 5), new Vec3(0, 0, -1), a, b, c), -1, "üçgenin dışı");
+    equals(GizmoMath.rayTriangle(new Vec3(0.5, 0.5, 5), new Vec3(0, 0, 1), a, b, c), -1, "ışının arkası");
+    equals(GizmoMath.rayTriangle(new Vec3(0.5, 0.5, 5), new Vec3(1, 0, 0), a, b, c), -1, "paralel ışın");
     near(GizmoMath.snap(2.3, 0.5), 2.5, "yakalama");
     near(GizmoMath.snap(2.3, 0), 2.3, "adım 0 değiştirmemeli");
     near(GizmoMath.segmentDistance(5, 3, 0, 0, 10, 0), 3, "doğru parçası");

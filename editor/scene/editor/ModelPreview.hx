@@ -9,7 +9,6 @@ class ModelPreview {
   static inline var BACKGROUND = 0xFF34343A;
 
   var scene = new h3d.scene.Scene();
-  var cache = new h3d.prim.ModelCache();
   var textures = new Map<String, Texture>();
   var queued = new Map<String, Bool>();
   var failures = new Map<String, String>();
@@ -46,7 +45,7 @@ class ModelPreview {
     queued.remove(path);
     var model = null;
     try {
-      model = cache.loadModel(hxd.Res.load(path).toModel());
+      model = ModelLibrary.load(path);
     } catch (e : Dynamic) {
       failures.set(path, Std.string(e));
       return;

@@ -11,6 +11,8 @@ class Entity {
   public var active(default, set) = true;
   // Yalnızca editörde, kişiye özel: dosyaya yazılmaz, oyunu etkilemez.
   public var hiddenInEditor(default, set) = false;
+  // Yalnızca editörde, kişiye özel: sahnede tıklanamaz, Hierarchy'den seçilebilir.
+  public var lockedInEditor = false;
   public var scene(default, null) : SceneInstance;
   public var parent(default, null) : Null<Entity>;
   public var children(default, null) : Array<Entity> = [];

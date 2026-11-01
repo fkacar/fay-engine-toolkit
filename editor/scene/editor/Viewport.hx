@@ -23,7 +23,8 @@ class Viewport {
   static inline var RIGHT = 1;
   static inline var MIDDLE = 2;
 
-  static inline var BOX_THRESHOLD = 5.;
+  static inline var BOX_THRESHOLD = 8.;
+  static inline var BOX_MINIMUM = 16.;
   static inline var TOOLBAR_MARGIN = 6.;
   static inline var FIELD_WIDTH = 56.;
   static inline var OUTLINE = 0xFFFFB040;
@@ -56,6 +57,7 @@ class Viewport {
     var ray = view.rayFromScreen(mouse.x, mouse.y);
 
     readInput(mouse.x, mouse.y, ray, dt);
+    trace(mouse.x, mouse.y);
     camera.update(dt);
     dropAsset(ray);
 
@@ -71,6 +73,16 @@ class Viewport {
   public function centerRay() : Ray {
     var engine = h3d.Engine.getCurrent();
     return view.rayFromScreen(engine.width * 0.5, engine.height * 0.5);
+  }
+
+  // Kameranın bozulduğu anı yakalamak için: tasarımcı kaydı dosyaya yazıp sorunla gönderir.
+  function trace(x : Float, y : Float) {
+    var io = ImGui.getIO();
+    var keys = (editor.isCommandHeld() ? "cmd " : "") + (Key.isDown(Key.ALT) ? "alt " : "") + (Key.isDown(Key.SHIFT) ? "shift " : "");
+    var buttons = (ImGui.isMouseDown(LEFT) ? "sol " : "") + (ImGui.isMouseDown(RIGHT) ? "sag " : "") + (ImGui.isMouseDown(MIDDLE) ? "orta " : "");
+    var motion = mode == Idle ? "" : ' dx=${Math.round(io.MouseDelta.x)} dy=${Math.round(io.MouseDelta.y)}';
+    var wheel = io.MouseWheel == 0 ? "" : ' tekerlek=${Math.round(io.MouseWheel * 100) / 100}';
+    editor.trace.record('$mode tus=[$keys] dugme=[$buttons] panel=${isHovered() ? 0 : 1} mesafe=${Math.round(camera.distance)}$motion$wheel');
   }
 
   function get_isFlying() {
@@ -96,7 +108,10 @@ class Viewport {
         }
       case BoxSelecting:
         if (ImGui.isMouseDown(LEFT)) return;
-        selectBox(x, y);
+        // Trackpad'de tıklarken imleç kayar: küçük kutu tıklama sayılır, seçimi boşaltmaz.
+        var isClick = Math.max(Math.abs(x - pressX), Math.abs(y - pressY)) < BOX_MINIMUM * editor.interfaceScale;
+        if (isClick) pickAt(view.rayFromScreen(pressX, pressY));
+        else selectBox(x, y);
         mode = Idle;
       case Dragging:
         gizmo.drag(vectorOf(ray), directionOf(ray), x, editor.interfaceScale);
@@ -120,7 +135,7 @@ class Viewport {
 
   function begin(x : Float, y : Float, ray : Ray) {
     var wheel = ImGui.getIO().MouseWheel;
-    if (wheel != 0) camera.dolly(wheel);
+    if (wheel != 0) camera.dolly(wheel, editor.actions.surfaceDistance(centerRay()));
     if (ImGui.isMouseClicked(RIGHT)) {
       mode = Flying;
     } else if (ImGui.isMouseClicked(MIDDLE)) {
@@ -128,8 +143,8 @@ class Viewport {
     } else if (ImGui.isMouseClicked(LEFT)) {
       if (Key.isDown(Key.ALT)) {
         // Orbit ekran ortasındaki zemin noktasının etrafında döner.
-        var center = editor.actions.groundUnder(centerRay());
-        camera.setDistance(new Vec3(center.x, center.y, center.z).sub(new Vec3(view.pos.x, view.pos.y, view.pos.z)).length());
+        var surface = editor.actions.surfaceDistance(centerRay());
+        if (surface != null) camera.setDistance(surface);
         mode = Orbiting;
       } else if (gizmo.hovered != 0) {
         gizmo.begin(editor.selection.roots(), vectorOf(ray), directionOf(ray), x);
@@ -143,7 +158,7 @@ class Viewport {
   }
 
   function pickAt(ray : Ray) {
-    var hit = Picker.pick(editor.scene, ray);
+    var hit = Picker.pick(editor.scene, ray, editor.actions.visibleDistance(ray));
     var selection = editor.selection;
     if (hit == null) {
       if (!isAdding()) selection.clear();
@@ -160,7 +175,7 @@ class Viewport {
     var top = Math.min(y, pressY), bottom = Math.max(y, pressY);
     var picked = isAdding() ? editor.selection.items.copy() : [];
     for (entity in editor.scene.entities) {
-      if (!entity.isShown() || picked.indexOf(entity) >= 0) continue;
+      if (!entity.isShown() || entity.lockedInEditor || picked.indexOf(entity) >= 0) continue;
       var corners = screenCorners(entity);
       if (corners == null) continue;
       if (Lambda.foreach(corners, c -> c.x >= left && c.x <= right && c.y >= top && c.y <= bottom)) picked.push(entity);

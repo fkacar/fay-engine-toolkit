@@ -1,4 +1,5 @@
 import components.GameComponents;
+import scene.FocusGuard;
 import scene.HiDpi;
 import scene.PlayOptions;
 import scene.SceneInstance;
@@ -43,6 +44,7 @@ class Main extends #if scene_editor imgui.ImGuiApp #else hxd.App #end {
       return;
     }
     #end
+    FocusGuard.install();
     level.start();
     if (play != null && play.camera != null) {
       s3d.camera.pos.set(play.camera[0], play.camera[1], play.camera[2]);

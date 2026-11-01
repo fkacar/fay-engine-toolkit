@@ -12,6 +12,7 @@ class AssetBrowser {
   static inline var IMPORT_POPUP = "Model içe aktar";
   static inline var TILE = 92.;
   static inline var SCAN_SECONDS = 2.;
+  static inline var IMPORT_WAIT_FRAMES = 3;
   static inline var TILE_COLOR = 0xFF3A3A40;
   static inline var FOLDER_COLOR = 0xFF5A4A34;
   static inline var LABEL_COLOR = 0xFFE0E0E0;
@@ -29,6 +30,8 @@ class AssetBrowser {
   var payload = new hl.Bytes(1);
   var openImport = false;
   var pending : Array<String> = [];
+  var importing : Null<String>;
+  var importWait = 0;
   var images = new Map<String, h3d.mat.Texture>();
 
   public function new(editor : Editor) {
@@ -84,11 +87,26 @@ class AssetBrowser {
       openImport = false;
     }
     if (!ImGui.beginPopupModal(IMPORT_POPUP, null, ImGuiWindowFlags.AlwaysAutoResize)) return;
+    // Büyük model saniyelerce sürer: yazı ekrana çıksın diye dönüştürme sonraki karelere kalır.
+    if (importing != null) {
+      ImGui.text('Dönüştürülüyor: $importing');
+      ImGui.textDisabled("Büyük modellerde editör bir süre tepki vermez");
+      if (--importWait <= 0) {
+        var source = importing;
+        importing = null;
+        importModel(source);
+      }
+      ImGui.endPopup();
+      return;
+    }
     ImGui.text("assets klasöründe olup res klasörüne alınmamış modeller:");
     if (pending.length == 0) ImGui.textDisabled("Yeni model yok");
     for (source in pending.copy()) {
       ImGui.pushID(source);
-      if (ImGui.smallButton("Al")) importModel(source);
+      if (ImGui.smallButton("Al")) {
+        importing = source;
+        importWait = IMPORT_WAIT_FRAMES;
+      }
       ImGui.sameLine();
       ImGui.text(source);
       ImGui.popID();
@@ -107,7 +125,7 @@ class AssetBrowser {
     }
     pending.remove(source);
     enter(Path.directory(result.target));
-    editor.show('İçe aktarıldı: ${result.target}');
+    editor.show('İçe aktarıldı: ${result.target} (${result.triangles} üçgen, ${result.parts} parça)');
   }
 
   function drawTiles() {

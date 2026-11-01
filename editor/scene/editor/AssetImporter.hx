@@ -7,6 +7,8 @@ import sys.io.File;
 typedef ImportResult = {
   var target : Null<String>;
   var problems : Array<String>;
+  var ?triangles : Int;
+  var ?parts : Int;
 }
 
 // `assets` ham kaynakları, `res` oyunun kullandıklarını tutar. FBX burada dönüştürülür ve
@@ -53,7 +55,9 @@ class AssetImporter {
     new hxd.fmt.hmd.Writer(out).write(hmd);
     File.saveBytes(target, out.getBytes());
     forgetMissingFiles();
-    return {target: target, problems: problems};
+    var triangles = 0;
+    for (geometry in hmd.geometries) triangles += Std.int(geometry.indexCount / 3);
+    return {target: target, problems: problems, triangles: triangles, parts: hmd.geometries.length};
   }
 
   // Heaps tek bir dokuyu bulamazsa modelin tamamını yüklemez. Bu yüzden eksik veya

@@ -10,6 +10,7 @@ class EditorCamera {
   static inline var LOOK_SPEED = 0.0045;  // rad/nokta
   static inline var MAX_PITCH = 1.54;
   static inline var DOLLY_STEP = 0.14;    // tekerlek adımında uzaklığın katı
+  static inline var MAX_WHEEL = 2.;       // trackpad'in hızlı kaydırması tek karede fırlatmasın
   static inline var SPEED_STEP = 1.2;
   static inline var BOOST = 3.;
   static inline var MIN_DISTANCE = 1.;
@@ -63,9 +64,14 @@ class EditorCamera {
     position = position.sub(right().scale(dx * unit)).add(up.scale(dy * unit));
   }
 
-  public function dolly(wheel : Float) {
+  // `surface` bakılan yüzeye gerçek uzaklık: uçtuktan sonra saklanan mesafe bayattır.
+  // Yüzeyin içine girilmez, kamera zeminin altına düşerse hiçbir şey görünmez.
+  public function dolly(wheel : Float, surface : Null<Float>) {
     goal = null;
-    var step = Math.max(distance, MIN_DISTANCE * 4) * DOLLY_STEP * wheel;
+    if (surface != null) distance = Math.max(surface, MIN_DISTANCE);
+    var amount = Math.max(-MAX_WHEEL, Math.min(MAX_WHEEL, wheel));
+    var step = Math.max(distance, MIN_DISTANCE * 4) * DOLLY_STEP * amount;
+    if (surface != null) step = Math.min(step, surface - MIN_DISTANCE);
     position = position.add(forward().scale(step));
     distance = Math.max(distance - step, MIN_DISTANCE);
   }

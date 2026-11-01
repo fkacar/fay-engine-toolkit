@@ -4,6 +4,7 @@ import h3d.mat.Texture;
 import hxd.Key;
 import imgui.ImGui;
 import imgui.types.ImFontAtlas.ImFontTexData;
+import scene.FocusGuard;
 import scene.HiDpi;
 import scene.PlayOptions;
 import scene.editor.panels.AssetBrowser;
@@ -50,6 +51,7 @@ class Editor {
   public var hierarchy(default, null) : HierarchyPanel;
   public var importer(default, null) = new AssetImporter();
   public var previews(default, null) = new ModelPreview();
+  public var trace(default, null) = new InputTrace();
   public var interfaceScale(default, null) = 1.;
   public var commandName(default, null) = Sys.systemName() == "Mac" ? "Cmd" : "Ctrl";
   public var centerX(default, null) = 0.;
@@ -84,6 +86,8 @@ class Editor {
     var window = hxd.Window.getInstance();
     window.addResizeEvent(() -> if (HiDpi.density != interfaceScale) scaleInterface());
     window.onClose = onWindowClose;
+    FocusGuard.install();
+    window.addEventTarget(e -> if (e.kind == EFocusLost) trace.record("odak kaybi"));
 
     validator = new Validator(assetExists);
     document = new SceneDocument(this, scene, path);
@@ -250,6 +254,10 @@ class Editor {
     }
     if (ImGui.beginMenu("Oyun")) {
       if (ImGui.menuItem("Buradan oyna", "F5", false, !session.isRunning)) play();
+      ImGui.endMenu();
+    }
+    if (ImGui.beginMenu("Yardım")) {
+      if (ImGui.menuItem("Girdi kaydını dosyaya yaz")) show('Yazıldı: ${trace.write()}');
       ImGui.endMenu();
     }
     ImGui.textDisabled(document.path);

@@ -19,6 +19,23 @@ class GizmoMath {
     return distance < 0 ? null : rayPos.add(rayDir.scale(distance));
   }
 
+  // Işın üzerindeki uzaklık, çarpmazsa -1. Üçgenin iki yüzü de sayılır.
+  public static function rayTriangle(rayPos : Vec3, rayDir : Vec3, a : Vec3, b : Vec3, c : Vec3) : Float {
+    var ab = b.sub(a), ac = c.sub(a);
+    var p = rayDir.cross(ac);
+    var determinant = ab.dot(p);
+    if (Math.abs(determinant) < 1e-12) return -1;
+    var inverse = 1 / determinant;
+    var offset = rayPos.sub(a);
+    var u = offset.dot(p) * inverse;
+    if (u < 0 || u > 1) return -1;
+    var q = offset.cross(ab);
+    var v = rayDir.dot(q) * inverse;
+    if (v < 0 || u + v > 1) return -1;
+    var distance = ac.dot(q) * inverse;
+    return distance < 0 ? -1 : distance;
+  }
+
   public static function snap(value : Float, step : Float) {
     return step <= 0 ? value : Math.round(value / step) * step;
   }

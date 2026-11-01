@@ -11,6 +11,7 @@ class HierarchyPanel {
   static inline var RENAME_WAIT_FRAMES = 4;
   static inline var EDITOR_TIP = "Editörde görünür. Yalnızca bu bilgisayarı etkiler, sahneye yazılmaz.";
   static inline var GAME_TIP = "Oyunda görünür. Sahneye kaydedilir, editörde görünmeye devam eder.";
+  static inline var LOCK_TIP = "Kilitli: sahnede tıklanamaz, buradan seçilebilir. Yalnızca bu bilgisayarı etkiler.";
 
   var editor : Editor;
   var renaming : Null<Entity>;
@@ -23,6 +24,7 @@ class HierarchyPanel {
   var deferred : Array<Void->Void> = [];
   var payload = new hl.Bytes(1);
   var togglesAt = 0.;
+  var toggleStep = 0.;
 
   public function new(editor : Editor) {
     this.editor = editor;
@@ -35,6 +37,11 @@ class HierarchyPanel {
     // Ağaç çizilirken sahne değişmemeli, işler çizimden sonra yapılır.
     for (action in deferred) action();
     deferred = [];
+    // Hedefe bırakılmayan sürükleme sonraki tıklamayı etkilemesin.
+    if (ImGui.isMouseReleased(0)) {
+      pressed = null;
+      dragged = [];
+    }
   }
 
   public function rename(entity : Null<Entity>) {
@@ -57,15 +64,18 @@ class HierarchyPanel {
 
   // İşaretler sağda sabit sütundadır: girintiye göre kaymaz, satırlar göz yormaz.
   function drawHeader() {
-    var size = ImGui.getFrameHeight();
+    toggleStep = ImGui.getTextLineHeightWithSpacing();
     var width = ImGui.getWindowSize().x - ImGui.getStyle().ScrollbarSize;
-    togglesAt = width - size * 2;
-    ImGui.sameLine(togglesAt);
-    ImGui.textDisabled("E");
-    if (ImGui.isItemHovered()) ImGui.setTooltip(EDITOR_TIP);
-    ImGui.sameLine(togglesAt + size);
-    ImGui.textDisabled("O");
-    if (ImGui.isItemHovered()) ImGui.setTooltip(GAME_TIP);
+    togglesAt = width - toggleStep * 3.5;
+    drawColumnTitle("E", 0, EDITOR_TIP);
+    drawColumnTitle("O", 1, GAME_TIP);
+    drawColumnTitle("K", 2, LOCK_TIP);
+  }
+
+  function drawColumnTitle(title : String, column : Int, tip : String) {
+    ImGui.sameLine(togglesAt + toggleStep * column);
+    ImGui.textDisabled(title);
+    if (ImGui.isItemHovered()) ImGui.setTooltip(tip);
   }
 
   function drawEntity(entity : Entity) {
@@ -107,11 +117,7 @@ class HierarchyPanel {
       else selection.set([entity]);
     }
     // Çoklu seçimde sürükleme başlayabilir, tek seçime ancak bırakınca düşülür.
-    if (pressed == entity && ImGui.isMouseReleased(0)) {
-      if (dragged.length == 0) selection.set([entity]);
-      pressed = null;
-      dragged = [];
-    }
+    if (pressed == entity && ImGui.isMouseReleased(0) && dragged.length == 0) selection.set([entity]);
     if (onLabel && ImGui.isItemHovered() && ImGui.isMouseDoubleClicked(0)) rename(entity);
   }
 
@@ -170,13 +176,20 @@ class HierarchyPanel {
     var seen = !entity.hiddenInEditor;
     if (ImGui.checkbox('##editor-${entity.id}', seen)) {
       entity.hiddenInEditor = !seen;
-      editor.document.rememberHidden();
+      editor.document.rememberFlags();
     }
     if (ImGui.isItemHovered()) ImGui.setTooltip(EDITOR_TIP);
-    ImGui.sameLine(togglesAt + ImGui.getFrameHeight() + ImGui.getStyle().FramePadding.y * 2);
+    ImGui.sameLine(togglesAt + toggleStep);
     var inGame = entity.active;
     if (ImGui.checkbox('##game-${entity.id}', inGame)) editor.commands.execute(new SetActiveCommand(entity, inGame));
     if (ImGui.isItemHovered()) ImGui.setTooltip(GAME_TIP);
+    ImGui.sameLine(togglesAt + toggleStep * 2);
+    var locked = entity.lockedInEditor;
+    if (ImGui.checkbox('##lock-${entity.id}', locked)) {
+      entity.lockedInEditor = locked;
+      editor.document.rememberFlags();
+    }
+    if (ImGui.isItemHovered()) ImGui.setTooltip(LOCK_TIP);
     ImGui.popStyleVar();
   }
 

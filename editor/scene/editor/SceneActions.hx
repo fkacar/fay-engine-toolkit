@@ -27,9 +27,10 @@ class SceneActions {
   static inline var GROUND_SEARCH = 500.;
   static inline var DROP_DISTANCE = 30.;
   static inline var FOCUS_RADIUS = 6.;
+  static inline var GROUND_MARGIN = 0.05;
 
   // Zemin oyuna özeldir (arazi, kat...). Oyun bunu verir, verilmezse z = 0 düzlemi kullanılır.
-  public var groundRay : Ray->Null<Point> = flatGround;
+  public var groundRay : Null<Ray->Null<Point>>;
 
   var editor : Editor;
   var assetTypes = new Map<String, AssetType>();
@@ -112,7 +113,7 @@ class SceneActions {
       editor.show('Bu dosya sahneye eklenemez: $path', true);
       return;
     }
-    var hit = groundRay(ray);
+    var hit = groundHit(ray);
     var place = hit == null ? ray.getPoint(DROP_DISTANCE) : hit;
     var item = new EntityData(Guid.make(), Path.withoutExtension(Path.withoutDirectory(path)));
     item.position = [place.x, place.y, place.z];
@@ -141,8 +142,24 @@ class SceneActions {
   }
 
   public function groundUnder(ray : Ray) : Point {
-    var hit = groundRay(ray);
+    var hit = groundHit(ray);
     return hit == null ? ray.getPoint(DROP_DISTANCE) : hit;
+  }
+
+  public function groundHit(ray : Ray) : Null<Point> {
+    return groundRay == null ? flatGround(ray) : groundRay(ray);
+  }
+
+  // Işının zemine kadarki uzunluğu. Kamera adımı bayat mesafeye değil buna bakar.
+  public function surfaceDistance(ray : Ray) : Null<Float> {
+    var hit = groundHit(ray);
+    return hit == null ? null : distanceAlong(ray, hit);
+  }
+
+  // Görünen en uzak nokta. Düz varsayılan zemin çizilmez, nesneleri de gizlemez.
+  public function visibleDistance(ray : Ray) : Float {
+    var hit = groundRay == null ? null : groundRay(ray);
+    return hit == null ? Math.POSITIVE_INFINITY : distanceAlong(ray, hit) + GROUND_MARGIN;
   }
 
   function add(items : Array<EntityData>, label : String) {
@@ -206,8 +223,12 @@ class SceneActions {
     var box = Picker.bounds(entity);
     var bottom = box.isEmpty() ? at.z : box.zMin;
     var top = box.isEmpty() ? at.z : box.zMax;
-    var hit = groundRay(Ray.fromValues(at.x, at.y, top + GROUND_SEARCH, 0, 0, -1));
+    var hit = groundHit(Ray.fromValues(at.x, at.y, top + GROUND_SEARCH, 0, 0, -1));
     return hit == null ? null : hit.z - bottom;
+  }
+
+  static function distanceAlong(ray : Ray, point : Point) {
+    return new Vec3(point.x - ray.px, point.y - ray.py, point.z - ray.pz).length();
   }
 
   static function flatGround(ray : Ray) : Null<Point> {
