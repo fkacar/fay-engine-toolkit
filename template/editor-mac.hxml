@@ -1,3 +1,4 @@
+libs/scene-toolkit/hidpi.hxml
 common.hxml
 libs/scene-toolkit/editor.hxml
 -D no-compilation

@@ -1,4 +1,5 @@
 import components.GameComponents;
+import scene.HiDpi;
 import scene.SceneInstance;
 import scene.SceneMode;
 import scene.data.SceneFormat;
@@ -16,6 +17,7 @@ class Main extends #if scene_editor imgui.ImGuiApp #else hxd.App #end {
 
   override function init() {
     super.init();
+    HiDpi.fit(s2d);
     #if scene_editor
     hxd.Res.initLocal();
     #else

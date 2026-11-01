@@ -5,6 +5,7 @@ import hxd.Key;
 import imgui.ImGui;
 import imgui.types.ImFontAtlas.ImFontTexData;
 import scene.FieldInfo;
+import scene.HiDpi;
 import scene.data.SceneData;
 import scene.data.SceneFormat;
 import scene.editor.commands.SetFieldCommand;
@@ -57,6 +58,8 @@ class Editor {
   var editStart : Dynamic;
   var transformStart : Transform;
   var glyphRanges : hl.NativeArray<hl.UI16>;
+  var fontTexture : Texture;
+  var interfaceScale = 1.;
 
   public function new(scene : SceneInstance, path : String) {
     this.scene = scene;
@@ -65,7 +68,8 @@ class Editor {
 
     var io = ImGui.getIO();
     io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
-    loadFont();
+    scaleInterface();
+    hxd.Window.getInstance().addResizeEvent(() -> if (HiDpi.density != interfaceScale) scaleInterface());
 
     addPanel(HIERARCHY, drawHierarchy);
     addPanel(INSPECTOR, drawInspector);
@@ -187,7 +191,7 @@ class Editor {
     if (noticeTime <= 0) return;
     noticeTime -= hxd.Timer.dt;
     var window = hxd.Window.getInstance();
-    ImGui.setNextWindowPos({x: window.width * 0.5, y: ImGui.getFrameHeight() + NOTICE_MARGIN}, 0, {x: 0.5, y: 0});
+    ImGui.setNextWindowPos({x: window.width * 0.5, y: ImGui.getFrameHeight() + NOTICE_MARGIN * interfaceScale}, 0, {x: 0.5, y: 0});
     var flags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoInputs
       | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoDocking;
     if (ImGui.begin("##notice", null, flags)) ImGui.textColored(noticeIsError ? ERROR_COLOR : SUCCESS_COLOR, notice);
@@ -329,17 +333,26 @@ class Editor {
       commands.execute(new SetFieldCommand(component, field.name, editStart, value, field.label));
   }
 
+  // ImGui kırpmayı ham pikselle yapar, bu yüzden 2D sahneler gibi yakınlaştırılamaz: font ve boşluklar büyür.
+  function scaleInterface() {
+    ImGui.getStyle().scaleAllSizes(HiDpi.density / interfaceScale);
+    interfaceScale = HiDpi.density;
+    loadFont();
+  }
+
   function loadFont() {
     glyphRanges = new hl.NativeArray(GLYPH_RANGES.length);
     for (i in 0...GLYPH_RANGES.length) glyphRanges[i] = GLYPH_RANGES[i];
 
     var fonts = ImGui.getIO().Fonts;
     fonts.clear();
-    fonts.addFontFromFileTTF(FONT_PATH, FONT_SIZE, null, glyphRanges);
+    fonts.addFontFromFileTTF(FONT_PATH, FONT_SIZE * interfaceScale, null, glyphRanges);
     var data = new ImFontTexData();
     fonts.getTexDataAsRGBA32(data);
     var bytes = data.buffer.toBytes(data.width * data.height * 4);
-    fonts.setTexId(Texture.fromPixels(new hxd.Pixels(data.width, data.height, bytes, hxd.PixelFormat.RGBA)));
+    if (fontTexture != null) fontTexture.dispose();
+    fontTexture = Texture.fromPixels(new hxd.Pixels(data.width, data.height, bytes, hxd.PixelFormat.RGBA));
+    fonts.setTexId(fontTexture);
     fonts.clearTexData();
   }
 

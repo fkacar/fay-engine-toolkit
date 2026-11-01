@@ -1,3 +1,4 @@
+libs/scene-toolkit/hidpi.hxml
 common.hxml
 -D no-compilation
 -hl bin/c/main.c

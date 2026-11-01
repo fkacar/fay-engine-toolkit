@@ -75,6 +75,17 @@ JSON'dur ve deterministik yazılır: aynı sahne her sistemde aynı dosyayı ür
 
 Biçim değişirse `SceneFormat.VERSION` artırılır ve `MIGRATIONS` listesine yükseltme eklenir.
 
+## Retina
+
+Mac derlemeleri `hidpi.hxml` ile Retina ekranda gerçek piksel boyutunda çizer. Heaps bunu desteklemediği için `hidpi/hxd/Window.hl.hx`, Heaps 2.1.0 dosyasının yamalı kopyasıdır. Windows derlemesine girmez.
+
+- `hidpi.hxml`, Mac `.hxml` dosyalarında `common.hxml`'den önce gelmelidir. Sonra gelirse Haxe, Heaps'in kendi dosyasını seçer ve derleme `pixelDensity` hatası verir.
+- Oyun `init` içinde `HiDpi.fit(s2d)` çağırır. `s2d` eski birimlerini korur, `s3d` ve `engine.width` gerçek pikseldir.
+- Editör `imguiScene` sahnesini yakınlaştırmaz, çünkü hlimgui kırpmayı ham pikselle yapar. Font ve stil `HiDpi.density` ile büyür.
+- Sabit boyutlu bitmap fontlar `s2d`'de yumuşatılarak büyütülür. Keskin olmaları için 2x atlas gerekir.
+- Heaps yükseltilirken yama yeni dosyaya yeniden uygulanır, değişen satırlar `HiDPI` ile işaretlidir.
+- Mac `.app` paketinin `Info.plist` dosyasında `NSHighResolutionCapable` açık olmalıdır.
+
 ## Testler
 
 Hızlı kontrol, proje kökünden: `haxe libs/scene-toolkit/tests.hxml`
