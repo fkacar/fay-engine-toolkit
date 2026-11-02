@@ -19,4 +19,8 @@ class GroupCommand implements Command {
     var i = commands.length;
     while (i-- > 0) commands[i].undo();
   }
+
+  public function touched() {
+    return [for (command in commands) for (entity in command.touched()) entity];
+  }
 }

@@ -22,4 +22,8 @@ class SetNameCommand implements Command {
   public function undo() {
     entity.name = before;
   }
+
+  public function touched() {
+    return [entity];
+  }
 }

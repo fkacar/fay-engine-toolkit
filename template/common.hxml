@@ -6,6 +6,7 @@ libs/scene-toolkit/runtime.hxml
 -main Main
 --macro scene.macro.SceneCheck.run("res/scenes")
 --macro scene.macro.SceneCheck.run("res/prefabs")
+--macro scene.macro.SceneCheck.run("res/world")
 -D analyzer-optimize
 -D windowSize=1280x720
 -D windowTitle=Yeni Oyun

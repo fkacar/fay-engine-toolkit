@@ -3,6 +3,7 @@ package scene;
 import scene.data.SceneData.ComponentData;
 import scene.data.SceneData.EntityData;
 import scene.data.SceneData.OverrideData;
+import scene.world.WorldData;
 
 // Sahnedeki bir nesne. Dönüş dosyada ve burada derecedir, Heaps'e radyan olarak verilir.
 @:allow(scene)
@@ -34,6 +35,9 @@ class Entity {
   public var prefab(default, null) : Null<String>;
   public var isPrefabPart(get, never) : Bool;
   public var isPrefabResolved(get, never) : Bool;
+  // Yüklendiği hücre. WorldData.GLOBAL ise her zaman yüklüdür, yeni nesnede henüz yoktur.
+  public var cell = WorldData.OUTSIDE;
+  public var root(get, never) : Entity;
 
   var prefabBase : Null<EntityData>;
   var prefabRelative = "";
@@ -132,6 +136,12 @@ class Entity {
 
   function get_isPrefabPart() {
     return instanceRoot != null && instanceRoot != this;
+  }
+
+  function get_root() {
+    var entity = this;
+    while (entity.parent != null) entity = entity.parent;
+    return entity;
   }
 
   function get_isPrefabResolved() {

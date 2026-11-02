@@ -35,4 +35,8 @@ class AddEntitiesCommand implements Command {
   function isChild(entity : Entity) {
     return entity.parent != null && entities.indexOf(entity.parent) >= 0;
   }
+
+  public function touched() {
+    return entities;
+  }
 }

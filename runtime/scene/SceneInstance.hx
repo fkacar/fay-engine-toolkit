@@ -30,7 +30,9 @@ class SceneInstance {
 
   var prefabs = new Map<String, SceneData>();
   var isReady = false;
+  var hasStarted = false;
   var services = new Map<String, Dynamic>();
+  var byId = new Map<String, Entity>();
 
   public function new(registry : ComponentRegistry, mode : SceneMode, parent : h3d.scene.Object) {
     this.registry = registry;
@@ -48,13 +50,13 @@ class SceneInstance {
   }
 
   public function find(id : String) : Null<Entity> {
-    for (entity in entities) if (entity.id == id) return entity;
-    return null;
+    return byId.get(id);
   }
 
   public function createEntity(name : String, ?id : String) : Entity {
     var entity = new Entity(this, id == null ? Guid.make() : id, name);
     entities.push(entity);
+    byId.set(entity.id, entity);
     return entity;
   }
 
@@ -64,6 +66,7 @@ class SceneInstance {
     entity.setParent(null);
     entity.object.remove();
     entities.remove(entity);
+    byId.remove(entity.id);
   }
 
   // Silme geri alınabilsin diye nesne yok edilmez: komutlar aynı nesneyi tutmaya devam eder.
@@ -74,6 +77,7 @@ class SceneInstance {
     for (slot in slots) {
       slot.index = entities.indexOf(slot.entity);
       entities.remove(slot.entity);
+      byId.remove(slot.entity.id);
     }
     var parent = entity.parent;
     var childIndex = parent == null ? 0 : parent.children.indexOf(entity);
@@ -86,7 +90,10 @@ class SceneInstance {
     var slots = detached.slots;
     var i = slots.length;
     // Çıkarıldığı sıranın tersiyle eklenir, böylece her nesne eski sırasına döner.
-    while (i-- > 0) entities.insert(slots[i].index, slots[i].entity);
+    while (i-- > 0) {
+      entities.insert(slots[i].index, slots[i].entity);
+      byId.set(slots[i].entity.id, slots[i].entity);
+    }
     if (detached.parent != null) detached.parent.children.insert(detached.childIndex, detached.entity);
     (detached.parent == null ? root : detached.parent.object).addChild(detached.entity.object);
     for (slot in slots) for (component in slot.entity.components) createComponent(component);
@@ -113,6 +120,7 @@ class SceneInstance {
 
   public function clear() {
     isReady = false;
+    hasStarted = false;
     for (entity in entities.filter(entity -> entity.parent == null)) destroyEntity(entity);
     warnings = [];
   }
@@ -175,6 +183,7 @@ class SceneInstance {
   // Prefab değişince instance yeniden kurulmaz: nesneler aynı kaldığı için undo geçmişi geçerli
   // kalır. Farklar yapıyı değiştiremediğinden yalnızca değerler yazılır.
   public function syncInstance(data : EntityData) {
+    if (find(data.id) == null) return;
     for (entry in Prefabs.expand(data, prefabData, warn)) {
       var entity = find(entry.data.id);
       if (entity == null) {
@@ -221,6 +230,13 @@ class SceneInstance {
     return data;
   }
 
+  // Kökü verilen koşula uyan nesneler: dünyada her hücre kendi dosyasına böyle yazılır.
+  public function toDataWhere(rootMatches : Entity->Bool) : SceneData {
+    var data = new SceneData(SceneFormat.VERSION);
+    for (entity in entities) if (!entity.isPrefabPart && rootMatches(entity.root)) data.entities.push(saveEntity(entity));
+    return data;
+  }
+
   // Instance'ın prefab'dan farkları. Elle takip edilmez: gizmo, Inspector ve komutların hepsi
   // aynı alanları değiştirdiği için kayıtta karşılaştırmak yeterlidir.
   public function overridesOf(root : Entity) : Array<OverrideData> {
@@ -254,7 +270,15 @@ class SceneInstance {
 
   public function start() {
     if (mode != Game) return;
+    hasStarted = true;
     for (entity in entities.copy()) for (component in entity.components) component.onStart();
+  }
+
+  // Oyun sürerken gelen hücre: nesneler başlangıcı kaçırmasın.
+  public function stream(items : Array<EntityData>) : Array<Entity> {
+    var created = instantiate(items);
+    if (hasStarted) for (entity in created) for (component in entity.components) component.onStart();
+    return created;
   }
 
   public function update(dt : Float) {

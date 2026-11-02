@@ -23,6 +23,15 @@ class ColliderComponent extends Component {
     }
   }
 
+  override public function navShapes() {
+    var frame = entity.object.getAbsPos();
+    if (shape == "kutu") return [scene.nav.NavShapes.box(frame, width, depth)];
+    if (shape == "kapsul") return [scene.nav.NavShapes.circle(frame.tx, frame.ty, radius)];
+    var bounds = entity.object.getBounds();
+    var center = bounds.getCenter();
+    return [scene.nav.NavShapes.box(h3d.Matrix.T(center.x, center.y, 0), bounds.xSize, bounds.ySize)];
+  }
+
   function drawModelBounds(overlay : Overlay) {
     var bounds = entity.object.getBounds();
     var frame = new h3d.Matrix();

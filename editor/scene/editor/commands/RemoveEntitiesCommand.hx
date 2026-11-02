@@ -25,4 +25,8 @@ class RemoveEntitiesCommand implements Command {
     while (i-- > 0) scene.attach(detached[i]);
     detached = [];
   }
+
+  public function touched() {
+    return entities;
+  }
 }

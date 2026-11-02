@@ -42,4 +42,8 @@ class SetParentCommand implements Command {
     }
     SetTransformCommand.apply(entity, before);
   }
+
+  public function touched() {
+    return [for (item in [entity, parent, previous]) if (item != null) item];
+  }
 }

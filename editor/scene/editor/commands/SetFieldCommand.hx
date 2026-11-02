@@ -30,4 +30,8 @@ class SetFieldCommand implements Command {
     component.writeField(field, value);
     component.refresh();
   }
+
+  public function touched() {
+    return [component.entity];
+  }
 }

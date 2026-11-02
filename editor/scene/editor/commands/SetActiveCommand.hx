@@ -20,4 +20,8 @@ class SetActiveCommand implements Command {
   public function undo() {
     entity.active = !value;
   }
+
+  public function touched() {
+    return [entity];
+  }
 }

@@ -5,6 +5,8 @@ import scene.Component;
 import scene.Entity;
 import scene.FieldInfo;
 import scene.RouteMarker;
+import scene.editor.commands.SetGlobalCommand;
+import scene.world.WorldData;
 import scene.editor.commands.AddComponentCommand;
 import scene.editor.commands.GroupCommand;
 import scene.editor.commands.RemoveComponentCommand;
@@ -21,6 +23,7 @@ class InspectorPanel {
   static inline var ADD_COMPONENT = "add-component";
   static inline var MIXED = "karışık";
   static inline var NUMBER = "%.6f";
+  static inline var GLOBAL_TIP = "Hücreye bağlı değildir, oyunda hep yüklü kalır. Oyuncunun ekibi gibi nesneler için.";
   static inline var APPLY_TIP = "Farkları prefab dosyasına yazar, tüm kopyalar güncellenir.";
   static inline var REVERT_TIP = "Bu kopyayı prefab'daki haline döndürür.";
   static inline var LABEL_SAMPLE = "Yükseklik ";
@@ -119,6 +122,10 @@ class InspectorPanel {
       var commands : Array<Command> = [for (entity in entities) new SetActiveCommand(entity, inGame)];
       editor.commands.execute(new GroupCommand("Oyunda göster/gizle", commands));
     }
+    if (editor.document.world == null || primary.parent != null || entities.length > 1) return;
+    var always = primary.cell == WorldData.GLOBAL;
+    if (ImGui.checkbox("Her zaman yüklü", always)) editor.commands.execute(new SetGlobalCommand(primary, always));
+    if (ImGui.isItemHovered()) ImGui.setTooltip(GLOBAL_TIP);
   }
 
   function drawTransform(entity : Entity) {

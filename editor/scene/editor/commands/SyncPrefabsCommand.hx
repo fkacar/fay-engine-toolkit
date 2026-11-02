@@ -50,4 +50,9 @@ class SyncPrefabsCommand implements Command {
     copy.overrides = [];
     return copy;
   }
+
+  public function touched() {
+    var none : Array<Entity> = [];
+    return none;
+  }
 }

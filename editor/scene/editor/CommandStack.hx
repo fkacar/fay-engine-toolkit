@@ -54,6 +54,34 @@ class CommandStack {
     savedVersion = -1;
   }
 
+  // Boşaltılan hücrenin adımları düşer, kalan adımlar başka nesnelerle ilgili olduğu için
+  // geçerliliğini korur. Bu yüzden hücre boşaltmak geçmişi silmez.
+  public function forget(match : Command->Bool) {
+    var clean = !isDirty;
+    var count = done.length;
+    var keptDone = [], keptHistory = [], keptUndone = [];
+    for (i in 0...count) {
+      if (match(done[i])) continue;
+      keptDone.push(done[i]);
+      keptHistory.push(history[i]);
+    }
+    // history'nin sonu yinelenecek adımlardır: sıradaki adım undone listesinin sonundadır.
+    var i = undone.length;
+    var next = count;
+    while (i-- > 0) {
+      if (!match(undone[i])) {
+        keptUndone.unshift(undone[i]);
+        keptHistory.push(history[next]);
+      }
+      next++;
+    }
+    done = keptDone;
+    undone = keptUndone;
+    history = keptHistory;
+    version = done.length == 0 ? 0 : history[done.length - 1];
+    if (clean) savedVersion = version;
+  }
+
   public function clear() {
     done = [];
     undone = [];

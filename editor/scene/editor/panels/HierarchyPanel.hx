@@ -3,6 +3,8 @@ package scene.editor.panels;
 import hxd.Key;
 import imgui.ImGui;
 import scene.Entity;
+import scene.editor.WorldDocument;
+import scene.world.WorldData;
 import scene.editor.commands.SetActiveCommand;
 import scene.editor.commands.SetNameCommand;
 
@@ -32,7 +34,9 @@ class HierarchyPanel {
 
   public function draw() {
     drawHeader();
-    for (entity in editor.scene.entities) if (entity.parent == null) drawEntity(entity, 0);
+    var world = editor.document.world;
+    if (world != null) drawCells(world);
+    else for (entity in editor.scene.entities) if (entity.parent == null) drawEntity(entity, 0);
     drawEmptyArea();
     // Ağaç çizilirken sahne değişmemeli, işler çizimden sonra yapılır.
     for (action in deferred) action();
@@ -41,6 +45,23 @@ class HierarchyPanel {
     if (ImGui.isMouseReleased(0)) {
       pressed = null;
       dragged = [];
+    }
+  }
+
+  function drawCells(world : WorldDocument) {
+    var data = world.data;
+    var roots = new Map<Int, Array<Entity>>();
+    for (entity in editor.scene.entities) {
+      if (entity.parent != null) continue;
+      var cell = world.cellOf(entity);
+      if (!roots.exists(cell)) roots.set(cell, []);
+      roots.get(cell).push(entity);
+    }
+    for (cell in [WorldData.GLOBAL].concat(world.loadedCells())) {
+      var items = roots.get(cell);
+      if (items == null) continue;
+      if (!ImGui.collapsingHeader('${data.title(cell)} (${items.length})##$cell', ImGuiTreeNodeFlags.DefaultOpen)) continue;
+      for (entity in items) drawEntity(entity, 0);
     }
   }
 

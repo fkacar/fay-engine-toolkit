@@ -21,4 +21,8 @@ class AddComponentCommand implements Command {
   public function undo() {
     entity.removeComponent(component);
   }
+
+  public function touched() {
+    return [entity];
+  }
 }

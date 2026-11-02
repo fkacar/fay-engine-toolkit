@@ -7,10 +7,13 @@ import imgui.types.ImFontAtlas.ImFontTexData;
 import scene.FocusGuard;
 import scene.HiDpi;
 import scene.Marker;
+import scene.world.WorldData;
+import scene.world.WorldState;
 import scene.PlayOptions;
 import scene.editor.panels.AssetBrowser;
 import scene.editor.panels.HierarchyPanel;
 import scene.editor.panels.InspectorPanel;
+import scene.editor.panels.WorldPanel;
 import sys.FileSystem;
 
 typedef Panel = {
@@ -23,13 +26,14 @@ typedef Panel = {
 class Editor {
   static inline var LAYOUT_FILE = "imgui.ini";
   // Düzen değişince artırılır: eski ölçülerle kaydedilmiş panel düzeni bir kez yenilenir.
-  static inline var LAYOUT_VERSION = 2;
+  static inline var LAYOUT_VERSION = 3;
   static inline var FONT_PATH = "libs/scene-toolkit/editor/fonts/DejaVuSansMono.ttf";
   static inline var FONT_SIZE = 15;
   static inline var HIERARCHY = "Hierarchy";
   static inline var INSPECTOR = "Inspector";
   static inline var ASSETS = "Asset Browser";
   static inline var WARNINGS = "Uyarılar";
+  static inline var WORLD = "Dünya";
   static inline var DIRTY_POPUP = "Kaydedilmemiş değişiklik";
   static inline var SAVE_AS_POPUP = "Farklı kaydet";
   static inline var RECOVERY_POPUP = "Otomatik yedek";
@@ -66,6 +70,7 @@ class Editor {
 
   var inspector : InspectorPanel;
   var assets : AssetBrowser;
+  var worldPanel : WorldPanel;
   var session = new PlaySession();
   var panels : Array<Panel> = [];
   var messages : Array<String> = [];
@@ -83,7 +88,8 @@ class Editor {
   var openPrefabPopup = false;
   var prefabName = "";
 
-  public function new(scene : SceneInstance, path : String) {
+  // Dünya verilirse `path` dünya dosyasını gösterir ve editör onunla açılır.
+  public function new(scene : SceneInstance, path : String, ?world : WorldState) {
     this.scene = scene;
     layoutPending = !FileSystem.exists(LAYOUT_FILE);
 
@@ -98,14 +104,17 @@ class Editor {
 
     selection.expand = entities -> groups.expand(entities, scene);
     validator = new Validator(assetExists);
-    document = new SceneDocument(this, scene, path);
+    document = new SceneDocument(this, scene, path, world);
     validator.rules.push(_ -> document.prefabRootIssues());
+    validator.isPartial = () -> document.world != null && !document.world.isComplete();
     if (document.prefs.layoutVersion != LAYOUT_VERSION) layoutPending = true;
     actions = new SceneActions(this);
     viewport = new Viewport(this, scene.root.getScene().camera);
     hierarchy = new HierarchyPanel(this);
     inspector = new InspectorPanel(this);
     assets = new AssetBrowser(this);
+    worldPanel = new WorldPanel(this);
+    if (WorldData.isWorldFile(path)) document.open(path);
     document.validate();
     for (type in document.prefs.hiddenMarkers) Marker.hiddenTypes.set(type, true);
 
@@ -113,6 +122,7 @@ class Editor {
     addPanel(INSPECTOR, inspector.draw);
     addPanel(ASSETS, assets.draw);
     addPanel(WARNINGS, drawWarnings);
+    addPanel(WORLD, worldPanel.draw);
   }
 
   public function addPanel(title : String, draw : Void->Void) {
@@ -133,7 +143,10 @@ class Editor {
       if (ImGui.begin(panel.title)) panel.draw();
       ImGui.end();
     }
-    if (showAssets) ImGui.setWindowFocus(ASSETS);
+    if (showAssets) {
+      ImGui.setWindowFocus(ASSETS);
+      ImGui.setWindowFocus(INSPECTOR);
+    }
     showAssets = false;
     viewport.update(dt);
     drawNotice();
@@ -189,6 +202,19 @@ class Editor {
   }
 
   // Kaydedilmemiş iş kaybolacaksa önce sorulur.
+  // Esc önce fırçayı bırakır, sonra seçimi kaldırır.
+  function cancelTool() {
+    var world = document.world;
+    if (world != null && world.brush.isActive) world.brush.tool = null;
+    else selection.clear();
+  }
+
+  // Kaydedilmemiş iş bu işlemle kaybolacaksa önce sorulur.
+  public function guardIf(needed : Bool, action : Void->Void) {
+    if (needed) guard(action);
+    else action();
+  }
+
   function guard(action : Void->Void) {
     if (!commands.isDirty) {
       action();
@@ -239,7 +265,7 @@ class Editor {
     if (Key.isPressed(Key.F)) actions.focus();
     if (Key.isPressed(Key.END)) actions.snapToGround();
     if (Key.isPressed(Key.L)) toggleLock();
-    if (Key.isPressed(Key.ESCAPE)) selection.clear();
+    if (Key.isPressed(Key.ESCAPE)) cancelTool();
     if (Key.isPressed(Key.DELETE) || Key.isPressed(Key.BACKSPACE)) actions.remove();
     if (Key.isPressed(Key.NUMBER_1)) viewport.gizmo.tool = Move;
     if (Key.isPressed(Key.NUMBER_2)) viewport.gizmo.tool = Rotate;
@@ -291,6 +317,10 @@ class Editor {
     if (ImGui.beginMenu("Görünüm")) {
       if (ImGui.menuItem("Editörde gizlenenleri göster")) document.showAll();
       if (ImGui.menuItem("Panel düzenini sıfırla")) layoutPending = true;
+      if (document.world != null) {
+        var bounds = document.world.showBounds;
+        if (ImGui.menuItem("Hücre sınırları", null, bounds)) document.world.showBounds = !document.world.showBounds;
+      }
       if (ImGui.beginMenu("İşaretçiler")) {
         for (marker in actions.placeableMarkers()) drawMarkerFilter(marker.componentId(), marker.title());
         ImGui.endMenu();
@@ -332,6 +362,7 @@ class Editor {
     if (!ImGui.beginMenu("Dosya")) return;
     if (ImGui.menuItem("Yeni sahne")) guard(document.newScene);
     if (ImGui.beginMenu("Aç")) {
+      if (document.canOpenWorld() && ImGui.menuItem("Dünya")) requestOpen(document.worldPath());
       for (path in document.sceneFiles()) if (ImGui.menuItem(path)) requestOpen(path);
       ImGui.endMenu();
     }
@@ -462,6 +493,7 @@ class Editor {
     ImGui.dockBuilderSplitNode(center, ImGuiDir.Down, 0.25, bottom, center);
     ImGui.dockBuilderDockWindow(HIERARCHY, left);
     ImGui.dockBuilderDockWindow(INSPECTOR, right);
+    ImGui.dockBuilderDockWindow(WORLD, right);
     ImGui.dockBuilderDockWindow(WARNINGS, bottom);
     ImGui.dockBuilderDockWindow(ASSETS, bottom);
     ImGui.dockBuilderFinish(dock);

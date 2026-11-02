@@ -11,6 +11,8 @@ typedef Issue = {
 // Kaydederken çalışır, kaydı engellemez: tasarımcı yarım işini de kaydedebilmeli.
 class Validator {
   public var rules : Array<SceneInstance->Array<Issue>> = [];
+  // Dünyanın bir kısmı yüklüyken başka hücredeki hedef kırık sanılmamalı.
+  public var isPartial : Void->Bool = () -> false;
 
   var assetExists : String->Bool;
 
@@ -44,7 +46,7 @@ class Validator {
           if (value == null || value == "") continue;
           if (isFile && !assetExists(value))
             issues.push({entity: entity, message: '${entity.name}: eksik asset "$value" (${field.label})'});
-          if (field.hint == HEntity && scene.find(value) == null)
+          if (field.hint == HEntity && scene.find(value) == null && !isPartial())
             issues.push({entity: entity, message: '${entity.name}: kırık referans ${field.label} ($value)'});
         }
     return issues;

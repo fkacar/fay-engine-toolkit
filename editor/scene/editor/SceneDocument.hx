@@ -3,6 +3,8 @@ package scene.editor;
 import scene.data.SceneData;
 import scene.data.SceneFormat;
 import scene.editor.Validator.Issue;
+import scene.world.WorldData;
+import scene.world.WorldState;
 import sys.FileSystem;
 import sys.io.File;
 
@@ -14,29 +16,48 @@ class SceneDocument {
   static inline var NEW_SCENE_NAME = "yeni";
   static inline var AUTOSAVE_DIRECTORY = EditorPrefs.DIRECTORY + "/autosave";
   static inline var AUTOSAVE_SECONDS = 60.;
+  static inline var AUTOSAVE_WORLD = AUTOSAVE_DIRECTORY + "/world";
 
   public var path(default, null) : String;
   public var lastSaved(default, null) = "";
   public var issues(default, null) : Array<Issue> = [];
   public var prefs(default, null) = new EditorPrefs();
   public var hasRecovery(default, null) = false;
+  // Açık belge dünyaysa dolu, tek sahne veya prefab açıkken boştur.
+  public var world(default, null) : Null<WorldDocument>;
 
+  var worlds : Null<WorldDocument>;
+  var worldFile = "";
   var editor : Editor;
   var scene : SceneInstance;
   var autosaveTimer = 0.;
   var autosavedRevision = 0;
 
-  public function new(editor : Editor, scene : SceneInstance, path : String) {
+  public function new(editor : Editor, scene : SceneInstance, path : String, ?state : WorldState) {
     this.editor = editor;
     this.scene = scene;
     this.path = path;
+    if (state != null) {
+      worlds = new WorldDocument(editor, scene, state);
+      worldFile = path;
+    }
     applyFlags();
     hasRecovery = isRecoverable();
   }
 
+  public function canOpenWorld() {
+    return worlds != null;
+  }
+
+  public function worldPath() {
+    return worldFile;
+  }
+
   public function save() {
+    var written = 1;
     try {
-      File.saveContent(path, SceneFormat.write(scene.toData()));
+      if (world != null) written = world.save();
+      else File.saveContent(path, SceneFormat.write(scene.toData()));
     } catch (e : Dynamic) {
       editor.show('Kaydedilemedi: $e', true);
       return false;
@@ -47,7 +68,8 @@ class SceneDocument {
     lastSaved = DateTools.format(Date.now(), "%H:%M:%S");
     validate();
     var count = warningCount();
-    editor.show(count == 0 ? 'Kaydedildi: $path' : 'Kaydedildi: $path ($count uyarı)', false);
+    var name = world == null ? path : '$written dosya';
+    editor.show(count == 0 ? 'Kaydedildi: $name' : 'Kaydedildi: $name ($count uyarı)', false);
     return true;
   }
 
@@ -67,13 +89,17 @@ class SceneDocument {
   }
 
   public function open(target : String) {
+    var isWorld = WorldData.isWorldFile(target) && worlds != null;
     try {
-      scene.load(SceneFormat.read(File.getContent(target)));
+      if (isWorld) worlds.open(prefs.cellsIn(target));
+      else scene.load(SceneFormat.read(File.getContent(target)));
     } catch (e : Dynamic) {
       editor.show('Açılamadı: $e', true);
       prefs.removeRecent(target);
       return;
     }
+    if (world != null && !isWorld) world.close();
+    world = isWorld ? worlds : null;
     path = target;
     prefs.addRecent(target);
     loaded('Açıldı: $target');
@@ -85,6 +111,8 @@ class SceneDocument {
 
   public function newScene() {
     scene.load(new SceneData(SceneFormat.VERSION));
+    if (world != null) world.close();
+    world = null;
     path = freeName();
     loaded('Yeni sahne: $path');
   }
@@ -98,7 +126,8 @@ class SceneDocument {
 
   public function recover() {
     try {
-      scene.load(SceneFormat.read(File.getContent(autosavePath())));
+      if (world != null) world.recover(AUTOSAVE_WORLD, prefs.cellsIn(path));
+      else scene.load(SceneFormat.read(File.getContent(autosavePath())));
     } catch (e : Dynamic) {
       editor.show('Yedek açılamadı: $e', true);
       discardRecovery();
@@ -116,7 +145,20 @@ class SceneDocument {
 
   public function rememberFlags() {
     var hidden = [for (entity in scene.entities) if (entity.hiddenInEditor) entity.id];
-    prefs.setFlags(path, hidden, editor.groups.toIds());
+    var groups = editor.groups.toIds();
+    // Yüklü olmayan hücrelerin kişisel ayarları kaybolmasın.
+    if (world != null) {
+      hidden = hidden.concat(prefs.hiddenIn(path).filter(id -> scene.find(id) == null));
+      groups = groups.concat(prefs.groupsIn(path).filter(group -> Lambda.exists(group, id -> scene.find(id) == null)));
+    }
+    prefs.setFlags(path, hidden, groups);
+  }
+
+  // Hücre yüklenince veya boşaltılınca seçim, kişisel ayarlar ve uyarılar güncellenir.
+  public function cellsChanged() {
+    prefs.setCells(path, world.loadedCells());
+    applyFlags();
+    validate();
   }
 
   public function showAll() {
@@ -147,7 +189,8 @@ class SceneDocument {
     if (!commands.isDirty || commands.revision == autosavedRevision) return;
     try {
       if (!FileSystem.exists(AUTOSAVE_DIRECTORY)) FileSystem.createDirectory(AUTOSAVE_DIRECTORY);
-      File.saveContent(autosavePath(), SceneFormat.write(scene.toData()));
+      if (world != null) world.autosave(AUTOSAVE_WORLD);
+      else File.saveContent(autosavePath(), SceneFormat.write(scene.toData()));
       autosavedRevision = commands.revision;
     } catch (e : Dynamic) {
       editor.show('Otomatik yedek alınamadı: $e', true);
@@ -161,6 +204,8 @@ class SceneDocument {
 
   public function removeAutosave() {
     if (FileSystem.exists(autosavePath())) FileSystem.deleteFile(autosavePath());
+    if (!FileSystem.exists(AUTOSAVE_WORLD)) return;
+    for (name in FileSystem.readDirectory(AUTOSAVE_WORLD)) FileSystem.deleteFile('$AUTOSAVE_WORLD/$name');
   }
 
   function loaded(message : String) {
@@ -190,6 +235,7 @@ class SceneDocument {
 
   // Yedek sahneden yeniyse editör kapanmadan önce kaydedilmemiş iş kalmıştır.
   function isRecoverable() {
+    if (WorldData.isWorldFile(path)) return FileSystem.exists(AUTOSAVE_WORLD) && FileSystem.readDirectory(AUTOSAVE_WORLD).length > 0;
     if (!FileSystem.exists(autosavePath())) return false;
     if (!FileSystem.exists(path)) return true;
     return FileSystem.stat(autosavePath()).mtime.getTime() > FileSystem.stat(path).mtime.getTime();

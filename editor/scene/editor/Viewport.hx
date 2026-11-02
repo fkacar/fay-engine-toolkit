@@ -16,6 +16,7 @@ private enum Mode {
   Orbiting;
   Panning;
   Grabbing;
+  Brushing;
 }
 
 // Panellerin ortasındaki sahne alanı: kamera girdisi, seçim, gizmo ve araç çubuğu.
@@ -72,13 +73,20 @@ class Viewport {
     camera.update(dt);
     dropAsset(ray);
 
-    var roots = editor.canEdit() ? editor.selection.roots() : [];
+    var brush = activeBrush();
+    var roots = editor.canEdit() && brush == null ? editor.selection.roots() : [];
     gizmo.layout(roots, mouse.x, mouse.y, mode == Idle && isHovered(), density);
     var list = ImGui.getBackgroundDrawList();
     overlay.begin(list, camera.forward(), density);
     for (entity in editor.scene.entities) {
       if (!entity.isShown()) continue;
       for (component in entity.components) component.drawOverlay(overlay, editor.selection.has(entity));
+    }
+    if (editor.document.world != null) editor.document.world.drawBounds(overlay, view.target.x, view.target.y);
+    if (editor.document.world != null) editor.document.world.drawNav(overlay, view.target.x, view.target.y);
+    if (brush != null) {
+      var hit = editor.actions.groundHit(ray);
+      if (hit != null) brush.drawCursor(overlay, hit.x, hit.y);
     }
     for (entity in editor.selection.items) drawOutline(list, entity, density);
     gizmo.draw(list, density);
@@ -164,7 +172,20 @@ class Viewport {
       case Grabbing:
         grabAt(ray);
         if (!ImGui.isMouseDown(LEFT)) mode = Idle;
+      case Brushing:
+        var brush = activeBrush();
+        var hit = editor.actions.groundHit(ray);
+        if (brush != null && hit != null) brush.apply(hit.x, hit.y, dt);
+        if (ImGui.isMouseDown(LEFT)) return;
+        var command = brush == null ? null : brush.finish();
+        if (command != null) editor.commands.execute(command);
+        mode = Idle;
     }
+  }
+
+  function activeBrush() : Null<WorldBrush> {
+    var world = editor.document.world;
+    return world != null && world.brush.isActive ? world.brush : null;
   }
 
   function begin(x : Float, y : Float, ray : Ray) {
@@ -179,7 +200,12 @@ class Viewport {
     } else if (ImGui.isMouseClicked(MIDDLE)) {
       mode = Panning;
     } else if (ImGui.isMouseClicked(LEFT)) {
-      if (gizmo.hovered != 0 && !isRotateHeld()) {
+      var brush = isRotateHeld() || editor.isCommandHeld() ? null : activeBrush();
+      var hit = brush == null ? null : editor.actions.groundHit(ray);
+      if (hit != null) {
+        brush.begin(hit.x, hit.y);
+        mode = Brushing;
+      } else if (gizmo.hovered != 0 && !isRotateHeld()) {
         gizmo.begin(editor.selection.roots(), vectorOf(ray), directionOf(ray), x);
         mode = Dragging;
       } else {

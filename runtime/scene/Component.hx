@@ -49,6 +49,17 @@ class Component {
     return [];
   }
 
+  // Yol ağında yürünemeyen alanlar, dünya koordinatında.
+  public function navShapes() : Array<scene.nav.NavCell.NavShape> {
+    return [];
+  }
+
+  // Hücre boşaltılmadan önce sorulur. Hücreden çıkıp oyuncunun yanına gelen şeyler, örneğin
+  // takip edilen kervan, hücreyle birlikte silinmesin diye true döner.
+  public function keepsCell(isNear : (Float, Float) -> Bool) : Bool {
+    return false;
+  }
+
   // Editörde her karede çağrılır: görünmeyen şekiller, sınırlar ve rotalar burada çizilir.
   public function drawOverlay(overlay : scene.Overlay, selected : Bool) {}
 

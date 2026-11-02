@@ -8,6 +8,17 @@ import scene.PlayOptions;
 import scene.SceneInstance;
 import scene.Entity;
 import scene.data.Prefabs;
+import scene.nav.NavBaker;
+import scene.nav.NavCell;
+import scene.nav.NavWorld;
+import scene.world.EnvironmentData;
+import scene.world.CellStreamer;
+import scene.world.ScatterCell;
+import scene.world.TerrainCell;
+import scene.world.WorldData;
+import scene.world.WorldState;
+import scene.world.WorldTerrain;
+import scene.world.WorldView;
 import scene.data.SceneData;
 import scene.data.SceneFormat;
 import scene.data.SceneSchema;
@@ -17,6 +28,7 @@ import scene.editor.LockGroups;
 import scene.editor.Selection;
 import scene.editor.Validator;
 import scene.editor.Vec3;
+import scene.editor.WorldBrush;
 import scene.editor.commands.AddComponentCommand;
 import scene.editor.commands.AddEntitiesCommand;
 import scene.editor.commands.GroupCommand;
@@ -107,6 +119,47 @@ class Walker extends Component {
 }
 
 class NoIdentity extends Component {}
+
+class NavShapes {
+  public static function box2(x : Float, y : Float, halfX : Float, halfY : Float) : NavShape {
+    return {x: x, y: y, halfX: halfX, halfY: halfY, angle: 0, isRound: false};
+  }
+
+  public static function circle(x : Float, y : Float, radius : Float) : NavShape {
+    return {x: x, y: y, halfX: radius, halfY: radius, angle: 0, isRound: true};
+  }
+}
+
+@:component("traveller")
+class Traveller extends Component {
+  public var at = 0.;
+
+  override public function keepsCell(isNear : (Float, Float) -> Bool) {
+    return isNear(at, 0);
+  }
+}
+
+class NullView implements WorldView {
+  public function new() {}
+
+  public function scatterTypes() : Array<ScatterType> {
+    return [];
+  }
+
+  public function weatherPresets() : Array<WeatherPreset> {
+    return [];
+  }
+
+  public function environmentChanged() {}
+
+  public function terrainChanged(cell : Int) {}
+
+  public function terrainRemoved(cell : Int) {}
+
+  public function scatterChanged(cell : Int) {}
+
+  public function scatterRemoved(cell : Int) {}
+}
 
 class TestMain {
   static var failures = 0;
@@ -1031,6 +1084,455 @@ class TestMain {
     equals(new Validator(_ -> true).run(scene).length, 0, "düzeltilince uyarı kalkmalı");
   }
 
+  static function emptyWorld() {
+    return new WorldData("world", 4, 3, 100, 10, [{id: "dogal", title: "Doğal", color: 0}]);
+  }
+
+  static function testWorldGrid() {
+    var world = emptyWorld();
+    equals(world.left, -200, "sol kenar");
+    equals(world.bottom, -150, "alt kenar");
+    equals(world.step, 10, "kare kenarı");
+    equals(world.cellAt(-200, -150), 0, "ilk hücre");
+    equals(world.cellAt(-100.5, -150), 0, "kenardan önce");
+    equals(world.cellAt(-100, -150), 1, "kenar sonraki hücreye ait");
+    equals(world.cellAt(199, 149), 11, "son hücre");
+    equals(world.cellAt(200, 0), WorldData.OUTSIDE, "dışarısı");
+    equals(world.nearest(900, -900), world.id(3, 0), "dışarıdaki nesne en yakın hücrede");
+    equals(world.columnOf(6), 2, "sütun");
+    equals(world.rowOf(6), 1, "satır");
+    equals(world.cellLeft(6), 0, "hücre solu");
+    equals(world.cellBottom(6), -50, "hücre altı");
+    equals(world.path(6, WorldData.TERRAIN_SUFFIX), "world/c_2_1.terrain.json", "arazi dosyası");
+    equals(world.path(WorldData.GLOBAL, WorldData.OBJECTS_SUFFIX), "world/global.scene.json", "genel dosya");
+    equals(world.around(0, 1).join(","), "0,1,4,5", "köşede komşular");
+    equals(world.around(5, 1)[0], 5, "merkez önce gelir");
+    equals(world.around(5, 1).length, 9, "ortada dokuz hücre");
+    var again = WorldData.read(world.write(), "world");
+    equals(again.columns, 4, "sütun sayısı okunmalı");
+    equals(again.write(), world.write(), "dünya dosyası kararlı");
+    check(WorldData.isWorldFile("res/world/main.world.json"), "dünya dosyası tanınmalı");
+    check(!WorldData.isWorldFile("res/scenes/main.scene.json"), "sahne dünya değil");
+  }
+
+  static function testTerrainCell() {
+    var cell = TerrainCell.flat(4, 2.5);
+    equals(cell.heights.length, 25, "köşe sayısı");
+    equals(cell.paint.length, 16, "kare sayısı");
+    cell.setHeight(1, 2, 7.126);
+    cell.setLayer(3, 1, 12);
+    var text = cell.write();
+    var read = TerrainCell.read(text);
+    equals(read.resolution, 4, "çözünürlük");
+    equals(read.height(1, 2), 7.13, "yükseklik santime yuvarlanır");
+    equals(read.layer(3, 1), 12, "boya");
+    equals(read.write(), text, "arazi dosyası kararlı");
+    check(text.split("\n").length > 10, "satır satır yazılmalı, git farkı okunur kalır");
+
+    var scatter = new ScatterCell();
+    scatter.items.push({type: "tree", x: 5, y: 1, rotation: 90, scale: 1.25});
+    scatter.items.push({type: "rock", x: 2, y: 3, rotation: 0, scale: 2});
+    scatter.items.push({type: "rock", x: 1, y: 3, rotation: 0, scale: 2});
+    var written = scatter.write();
+    var swapped = new ScatterCell([scatter.items[1], scatter.items[2], scatter.items[0]]);
+    equals(swapped.write(), written, "yerleştirme sırası dosyayı değiştirmemeli");
+    equals(ScatterCell.read(written).items.length, 3, "saçma okunmalı");
+    equals(ScatterCell.read(written).write(), written, "saçma dosyası kararlı");
+  }
+
+  static function testWorldTerrain() {
+    var world = new WorldData("world", 2, 1, 40, 4, []);
+    var terrain = new WorldTerrain(world);
+    equals(terrain.heightAt(0, 0), 0, "yüklü olmayan hücre sıfır");
+    var left = TerrainCell.flat(4, 1), right = TerrainCell.flat(4, 1);
+    for (y in 0...5) {
+      left.setHeight(4, y, 5);
+      right.setHeight(0, y, 5);
+      right.setHeight(4, y, 9);
+    }
+    terrain.set(0, left);
+    terrain.set(1, right);
+    equals(terrain.heightAt(-40, 0), 1, "sol hücre");
+    equals(terrain.heightAt(0, 0), 5, "ortak kenar");
+    equals(terrain.heightAt(-5, 0), 3, "kare içinde doğrusal");
+    check(Math.abs(terrain.heightAt(40, 0) - 9) < 0.01, 'sağ kenar: ${terrain.heightAt(40, 0)}');
+    equals(terrain.heightAt(-999, 0), 1, "dışarısı kenardaki yüksekliği alır");
+    check(terrain.contains(0, 0), "dünyanın içi");
+    check(!terrain.contains(41, 0), "dünyanın dışı");
+  }
+
+  static function testStreaming() {
+    var world = new WorldData("world", 5, 1, 10, 2, []);
+    var files = new Map<String, String>();
+    function objects(cell : Int, id : String) {
+      var data = new SceneData(SceneFormat.VERSION);
+      var item = new EntityData(id, id);
+      item.components.push(new ComponentData("crate"));
+      data.entities.push(item);
+      files.set(world.path(cell, WorldData.OBJECTS_SUFFIX), SceneFormat.write(data));
+    }
+    objects(WorldData.GLOBAL, "ekip");
+    for (cell in world.cells()) objects(cell, "n" + cell);
+    var state = new WorldState(world, path -> files.get(path));
+    var scene = newScene(Game);
+    var streamer = new CellStreamer(state, scene, true);
+    streamer.objectRadius = 1;
+    streamer.terrainRadius = 2;
+    streamer.start(world.cellLeft(0) + 1, 0);
+    equals(scene.entities.length, 3, "genel ve iki hücre yüklü");
+    check(scene.find("ekip") != null, "genel nesne yüklü");
+    check(streamer.isLoaded(1) && !streamer.isLoaded(2), "yalnızca yakın hücreler");
+    check(state.terrain.get(2) != null && state.terrain.get(3) == null, "arazi daha geniş halkada");
+    scene.start();
+
+    streamer.update(world.cellLeft(2) + 1, 0);
+    check(streamer.isLoaded(0), "bir hücre geriden boşalır, sınırda gidip gelmek hücreyi kapatmaz");
+    equals(streamer.loadedCount(), 3, "karede tek hücre açılır");
+    streamer.update(world.cellLeft(2) + 1, 0);
+    equals(streamer.loadedCount(), 4, "sıradaki hücre sonraki karede");
+    check(scene.find("n3") != null, "yeni hücre gelmeli");
+    streamer.update(world.cellLeft(3) + 1, 0);
+    check(!streamer.isLoaded(0), "uzaklaşan hücre boşalmalı");
+    check(scene.find("n0") == null, "boşalan hücrenin nesnesi gitmeli");
+    check(scene.find("ekip") != null, "genel nesne hücreyle gitmez");
+    check(state.terrain.get(1) != null, "yakın arazi kalır");
+    streamer.update(world.cellLeft(4) + 1, 0);
+    check(state.terrain.get(1) == null, "uzak arazi gider");
+    streamer.update(9999, 0);
+    check(scene.find("ekip") != null, "dünya dışına çıkmak bir şey bozmamalı");
+
+    // Hücresinden çıkıp oyuncunun yanına gelen kervan hücreyle silinmez
+    var types = registry();
+    types.register(Traveller);
+    var moving = new SceneData(SceneFormat.VERSION);
+    var item = new EntityData("kervan", "Kervan");
+    item.components.push(new ComponentData("traveller"));
+    moving.entities.push(item);
+    files.set(world.path(0, WorldData.OBJECTS_SUFFIX), SceneFormat.write(moving));
+    var held = new SceneInstance(types, Game, new Object());
+    var follow = new CellStreamer(new WorldState(world, path -> files.get(path)), held, true);
+    follow.objectRadius = 0;
+    follow.start(world.cellLeft(0) + 1, 0);
+    held.start();
+    var traveller = held.find("kervan").getComponent(Traveller);
+    traveller.at = world.cellLeft(4) + 1;
+    follow.update(world.cellLeft(4) + 1, 0);
+    check(follow.isLoaded(0), "kervan kameranın yanındayken hücresi boşalmamalı");
+    check(held.find("kervan") != null, "takip edilen kervan silinmemeli");
+    follow.update(world.cellLeft(4) + 1, 0);
+    traveller.at = world.cellLeft(0) + 1;
+    follow.update(world.cellLeft(4) + 1, 0);
+    check(!follow.isLoaded(0), "kervan uzaklaşınca hücre boşalmalı");
+    check(held.find("kervan") == null, "uzaktaki kervan gitmeli");
+
+    // Tek sahne açıkken nesne yüklenmez
+    var plain = newScene(Game);
+    var terrainOnly = new CellStreamer(new WorldState(world, path -> null), plain, false);
+    terrainOnly.start(0, 0);
+    equals(plain.entities.length, 0, "tek sahnede hücre nesnesi yok");
+  }
+
+  static function testEntityLookup() {
+    var scene = newScene();
+    var parent = scene.createEntity("Üst", "a");
+    var child = scene.createEntity("Alt", "b");
+    child.setParent(parent);
+    equals(child.root, parent, "kök bulunmalı");
+    equals(parent.root, parent, "kök kendisi");
+    equals(scene.find("b"), child, "kimlikle bulunmalı");
+    var detached = scene.detach(parent);
+    equals(scene.find("b"), null, "çıkarılan bulunmamalı");
+    scene.attach(detached);
+    equals(scene.find("b"), child, "geri gelen bulunmalı");
+    scene.destroyEntity(parent);
+    equals(scene.find("a"), null, "silinen bulunmamalı");
+    equals(scene.find("b"), null, "silinen alt nesne bulunmamalı");
+
+    var world = scene.createEntity("Kök", "c");
+    equals(scene.toDataWhere(root -> root == world).entities.length, 1, "koşula uyan kök");
+    equals(scene.toDataWhere(root -> root != world).entities.length, 0, "koşula uymayan kök");
+  }
+
+  // Hücre boşaltmak yalnızca o hücrenin adımlarını düşürür.
+  static function testForgetCommands() {
+    var scene = newScene();
+    var a = scene.createEntity("A", "a"), b = scene.createEntity("B", "b");
+    var stack = new CommandStack();
+    stack.execute(new SetNameCommand(a, "A", "A1"));
+    stack.execute(new SetNameCommand(b, "B", "B1"));
+    stack.execute(new SetNameCommand(a, "A1", "A2"));
+    stack.execute(new SetNameCommand(b, "B1", "B2"));
+    stack.undo();
+    equals(stack.undoCount, 3, "üç adım");
+    equals(stack.redoCount, 1, "bir yineleme");
+    stack.forget(command -> command.touched().indexOf(a) >= 0);
+    equals(stack.undoCount, 1, "A adımları düşmeli");
+    equals(stack.redoCount, 1, "yineleme kalmalı");
+    stack.redo();
+    equals(b.name, "B2", "kalan yineleme çalışmalı");
+    stack.undo();
+    stack.undo();
+    equals(b.name, "B", "kalan adım geri alınmalı");
+    equals(a.name, "A2", "düşen adım a'ya dokunmamalı");
+    check(!stack.canUndo, "geçmiş boşalmalı");
+
+    var clean = new CommandStack();
+    clean.execute(new SetNameCommand(a, "A2", "A3"));
+    clean.markSaved();
+    clean.forget(_ -> true);
+    check(!clean.isDirty, "kayıtlı geçmişi temizlemek kirletmemeli");
+
+    var group = new GroupCommand("Grup", [new SetNameCommand(a, "x", "y"), new SetNameCommand(b, "x", "y")]);
+    equals(group.touched().length, 2, "grup üyelerini bildirmeli");
+  }
+
+  static function brushWorld(editable : Int->Bool, ?calls : Array<Array<Int>>) {
+    var world = new WorldData("world", 2, 2, 40, 4, [{id: "a", title: "A", color: 0}, {id: "b", title: "B", color: 1}]);
+    var state = new WorldState(world, _ -> null);
+    state.view = new NullView();
+    state.loadAllTerrain();
+    return {state: state, brush: new WorldBrush(state, editable, (terrain, scatter) -> if (calls != null) calls.push(terrain))};
+  }
+
+  static function testBrushes() {
+    var test = brushWorld(_ -> true);
+    var state = test.state, brush = test.brush;
+    brush.tool = Raise;
+    brush.radius = 15;
+    brush.begin(0, 0);
+    brush.apply(0, 0, 0.5);
+    var command = brush.finish();
+    var peak = state.terrain.heightAt(0, 0);
+    check(peak > 0, 'yükselmeli: $peak');
+    check(Math.abs(state.terrain.heightAt(5, 5) - peak) < peak, "uzak köşe daha az yükselir");
+    equals(state.terrain.heightAt(25, 25), 0, "yarıçap dışı değişmez");
+    // Kesişimdeki köşe dört hücrede de aynı
+    for (cell in 0...4) {
+      var data = state.terrain.get(cell);
+      var x = cell % 2 == 0 ? 4 : 0, y = cell < 2 ? 4 : 0;
+      equals(data.height(x, y), peak, 'ortak köşe hücre $cell');
+    }
+
+    var stack = new CommandStack();
+    stack.execute(command);
+    equals(state.terrain.heightAt(0, 0), peak, "komut aynı sonucu vermeli");
+    stack.undo();
+    equals(state.terrain.heightAt(0, 0), 0, "geri alınmalı");
+    stack.redo();
+    equals(state.terrain.heightAt(0, 0), peak, "yinelenmeli");
+
+    brush.tool = Lower;
+    brush.begin(0, 0);
+    brush.apply(0, 0, 0.5);
+    brush.finish();
+    check(Math.abs(state.terrain.heightAt(0, 0)) < 0.001, 'alçalmalı: ${state.terrain.heightAt(0, 0)}');
+
+    brush.tool = Raise;
+    brush.begin(0, 0);
+    brush.apply(0, 0, 1);
+    brush.finish();
+    brush.tool = Flatten;
+    brush.strength = 1;
+    brush.radius = 30;
+    brush.begin(0, 0);
+    for (i in 0...100) brush.apply(0, 0, 0.1);
+    brush.finish();
+    var center = state.terrain.heightAt(0, 0);
+    check(Math.abs(state.terrain.vertexHeight(5, 4) - center) < 0.5, 'düzleşmeli: ${state.terrain.vertexHeight(5, 4)} / $center');
+
+    var rough = brushWorld(_ -> true);
+    rough.state.terrain.setVertexHeight(4, 4, 10);
+    rough.brush.tool = Smooth;
+    rough.brush.strength = 1;
+    rough.brush.begin(0, 0);
+    for (i in 0...10) rough.brush.apply(0, 0, 0.1);
+    rough.brush.finish();
+    check(rough.state.terrain.vertexHeight(4, 4) < 5, 'yumuşamalı: ${rough.state.terrain.vertexHeight(4, 4)}');
+    check(rough.state.terrain.vertexHeight(5, 4) > 0, "komşu yükselmeli");
+  }
+
+  // Yüklü olmayan hücreye dokunan kenar değişmez: iki kişi komşu hücrede çalışınca çakışmaz.
+  static function testBrushLockedEdges() {
+    var calls = [];
+    var test = brushWorld(cell -> cell == 0, calls);
+    var state = test.state, brush = test.brush;
+    var other = state.terrain.get(1).write();
+    brush.tool = Raise;
+    brush.radius = 60;
+    brush.begin(-20, -20);
+    brush.apply(-20, -20, 1);
+    var command = brush.finish();
+    check(state.terrain.get(0).height(2, 2) > 0, "yüklü hücre değişmeli");
+    equals(state.terrain.get(0).height(4, 2), 0, "komşusu yüklü olmayan kenar kilitli");
+    equals(state.terrain.get(0).height(2, 4), 0, "üst kenar kilitli");
+    equals(state.terrain.get(1).write(), other, "yüklü olmayan hücre değişmemeli");
+    check(command.touchesCell(0), "komut kendi hücresini bildirmeli");
+    check(!command.touchesCell(1), "komut başka hücreyi bildirmemeli");
+
+    var paint = brushWorld(cell -> cell == 0);
+    paint.brush.tool = Paint;
+    paint.brush.radius = 30;
+    paint.brush.layer = 1;
+    paint.brush.begin(0, 0);
+    paint.brush.apply(0, 0, 0.1);
+    var painted = paint.brush.finish();
+    equals(paint.state.terrain.get(0).layer(3, 3), 1, "boya uygulanmalı");
+    equals(paint.state.terrain.get(1).layer(0, 3), 0, "yüklü olmayan hücre boyanmamalı");
+    var stack = new CommandStack();
+    stack.execute(painted);
+    stack.undo();
+    equals(paint.state.terrain.get(0).layer(3, 3), 0, "boya geri alınmalı");
+
+    var heights = brushWorld(cell -> cell == 0);
+    var map = heights.brush.replaceHeights((u, v) -> 50, "Yükseklik haritası");
+    equals(heights.state.terrain.get(0).height(1, 1), 50, "yükseklik haritası uygulanmalı");
+    equals(heights.state.terrain.get(0).height(4, 1), 0, "kilitli kenar korunmalı");
+    equals(heights.state.terrain.get(3).height(1, 1), 0, "yüklü olmayan hücre korunmalı");
+    var undo = new CommandStack();
+    undo.execute(map);
+    undo.undo();
+    equals(heights.state.terrain.get(0).height(1, 1), 0, "yükseklik haritası geri alınmalı");
+  }
+
+  static function testScatterBrush() {
+    var test = brushWorld(cell -> cell != 1);
+    var state = test.state, brush = test.brush;
+    brush.tool = Scatter;
+    brush.scatterType = "rock";
+    brush.radius = 15;
+    brush.density = 0.1;
+    brush.begin(-20, -20);
+    brush.apply(-20, -20, 0.1);
+    brush.apply(-20, -20, 0.1);
+    var command = brush.finish();
+    var items = state.scatter.get(0).items;
+    check(items.length > 0, "saçılmalı");
+    for (item in items) {
+      check(item.scale >= brush.minScale && item.scale <= brush.maxScale, 'ölçek aralıkta: ${item.scale}');
+      equals(item.type, "rock", "tür");
+    }
+    var count = items.length;
+    var stack = new CommandStack();
+    stack.execute(command);
+    stack.undo();
+    equals(state.scatter.get(0).items.length, 0, "saçma geri alınmalı");
+    stack.redo();
+    equals(state.scatter.get(0).items.length, count, "saçma yinelenmeli");
+
+    // Yüklü olmayan hücreye saçılmaz
+    brush.begin(20, -20);
+    brush.apply(20, -20, 0.1);
+    brush.finish();
+    equals(state.scatter.get(1), null, "yüklü olmayan hücre değişmemeli");
+
+    state.scatter.get(0).items.push({type: "tree", x: -20, y: -20, rotation: 0, scale: 1});
+    brush.tool = Erase;
+    brush.begin(-20, -20);
+    brush.apply(-20, -20, 0.1);
+    var erased = brush.finish();
+    equals(state.scatter.get(0).items.filter(item -> item.type == "rock").length, 0, "seçili tür silinmeli");
+    equals(state.scatter.get(0).items.length, 1, "başka tür kalmalı");
+    stack.execute(erased);
+    stack.undo();
+    equals(state.scatter.get(0).items.length, count + 1, "silme geri alınmalı");
+  }
+
+  // Yol ağı için iki hücrelik dünya: ortada kapısı olan duvar.
+  static function navWorld(gap : Bool) {
+    var world = new WorldData("world", 2, 1, 20, 2, []);
+    world.navResolution = 10;
+    var files = new Map<String, String>();
+    var state = new WorldState(world, path -> files.get(path));
+    state.loadAllTerrain();
+    var shapes = [NavShapes.box2(0, gap ? -6 : 0, 1, gap ? 4 : 10)];
+    for (cell in world.cells()) files.set(world.path(cell, WorldData.NAV_SUFFIX), NavBaker.bake(cell, world, state.terrain, shapes).write());
+    return {world: world, state: state, files: files, nav: new NavWorld(state)};
+  }
+
+  static function testNav() {
+    var cell = new NavCell(4);
+    cell.block(1, 0);
+    cell.block(2, 0);
+    cell.block(0, 3);
+    var text = cell.write();
+    var read = NavCell.read(text);
+    check(read.isBlocked(1, 0) && read.isBlocked(0, 3) && !read.isBlocked(3, 0), "yol ağı okunmalı");
+    equals(read.write(), text, "yol ağı dosyası kararlı");
+    check(text.indexOf('"1,2,1"') >= 0, 'satır uzunluklarla yazılmalı: $text');
+
+    // Düz arazide yol düz çizgidir
+    var open = navWorld(true);
+    var path = open.nav.findPath(-15, 8, 15, 8);
+    equals(path.length, 1, 'engelsiz yol tek parça: ${path.length}');
+    equals(path[0].x, 15, "hedefe gitmeli");
+
+    // Duvarın kapısından geçer
+    var around = open.nav.findPath(-15, -6, 15, -6);
+    check(around.length > 1, 'duvarı dolaşmalı: $around');
+    var lastY = -6.;
+    var ax = -15., ay = -6.;
+    for (point in around) {
+      var steps = 40;
+      for (i in 0...steps) {
+        var x = ax + (point.x - ax) * i / steps, y = ay + (point.y - ay) * i / steps;
+        check(open.nav.isWalkable(x, y), 'yol engelden geçmemeli: $x, $y');
+      }
+      ax = point.x;
+      ay = point.y;
+    }
+    equals(around[around.length - 1].x, 15, "hedefe varmalı");
+    equals(around[around.length - 1].y, -6, "hedefe varmalı");
+
+    // Kapalı duvar: yol yok, en yakın yere gider
+    var closed = navWorld(false);
+    var blocked = closed.nav.findPath(-15, 0, 15, 0);
+    var end = blocked[blocked.length - 1];
+    check(end.x < 0, 'duvarı geçmemeli: ${end.x}');
+    check(end.x > -5, 'duvara en yakın yere gitmeli: ${end.x}');
+
+    // Başlangıç engelin içindeyse en yakın açık yerden çıkar
+    check(closed.nav.findPath(0, 0, -15, 0).length >= 1, "engel içinden çıkabilmeli");
+
+    // Dosya yoksa hücre yürünebilir sayılır
+    var world = new WorldData("world", 2, 1, 20, 2, []);
+    world.navResolution = 10;
+    var state = new WorldState(world, _ -> null);
+    equals(new NavWorld(state).findPath(-15, 0, 15, 0).length, 1, "yol ağı yoksa düz gider");
+
+    // Dik yamaç yürünmez
+    var slope = new WorldData("world", 1, 1, 20, 2, []);
+    slope.navResolution = 10;
+    var hill = new WorldTerrain(slope);
+    var terrain = TerrainCell.flat(2);
+    terrain.setHeight(2, 0, 90);
+    terrain.setHeight(2, 1, 90);
+    terrain.setHeight(2, 2, 90);
+    hill.set(0, terrain);
+    var baked = NavBaker.bake(0, slope, hill, []);
+    check(baked.isBlocked(8, 5), "dik yamaç kapalı");
+    equals(NavBaker.bake(0, slope, hill, []).write(), baked.write(), "aynı girdi aynı dosya");
+
+    var round = NavBaker.bake(0, slope, new WorldTerrain(slope), [NavShapes.circle(0, 0, 3)]);
+    check(round.isBlocked(5, 5), "yuvarlak engel kapalı");
+    check(!round.isBlocked(0, 0), "uzak düğüm açık");
+  }
+
+  static function testEnvironment() {
+    var environment = new EnvironmentData();
+    environment.hour = 19.5;
+    environment.fogColor = 0x102030;
+    var text = environment.write();
+    var read = EnvironmentData.read(text);
+    equals(read.hour, 19.5, "saat okunmalı");
+    equals(read.fogColor, 0x102030, "renk okunmalı");
+    equals(read.write(), text, "ortam dosyası kararlı");
+    var copy = read.clone();
+    copy.applyPreset({id: "a", title: "A", sun: 0.5, fogStart: 1, fogEnd: 2, fogColor: 3});
+    equals(copy.sun, 0.5, "hazır ayar uygulanmalı");
+    equals(copy.hour, 19.5, "hazır ayar saati değiştirmez");
+    equals(read.sun, environment.sun, "kopya aslını değiştirmez");
+  }
+
   static function testValidator() {
     var types = new ComponentRegistry();
     types.register(Pointer);
@@ -1124,6 +1626,17 @@ class TestMain {
     testPrefabs();
     testPrefabUndo();
     testChoiceValues();
+    testWorldGrid();
+    testTerrainCell();
+    testWorldTerrain();
+    testStreaming();
+    testEntityLookup();
+    testForgetCommands();
+    testBrushes();
+    testBrushLockedEdges();
+    testScatterBrush();
+    testNav();
+    testEnvironment();
     testPrefabFailures();
     testPrefabSchema();
     testGizmoMath();

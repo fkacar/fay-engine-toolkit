@@ -17,6 +17,7 @@ class EditorPrefs {
 
   var hidden : DynamicAccess<Array<String>> = {};
   var groups : DynamicAccess<Array<Array<String>>> = {};
+  var cells : DynamicAccess<Array<Int>> = {};
 
   public function new() {
     if (!FileSystem.exists(FILE)) return;
@@ -25,6 +26,7 @@ class EditorPrefs {
       if (saved.recent != null) recent = saved.recent;
       if (saved.hidden != null) hidden = saved.hidden;
       if (saved.groups != null) groups = saved.groups;
+      if (saved.cells != null) cells = saved.cells;
       if (saved.layoutVersion != null) layoutVersion = saved.layoutVersion;
       if (saved.hiddenMarkers != null) hiddenMarkers = saved.hiddenMarkers;
     } catch (e : Dynamic) {
@@ -64,6 +66,16 @@ class EditorPrefs {
     return saved == null ? [] : saved;
   }
 
+  public function cellsIn(world : String) : Array<Int> {
+    var saved = cells.get(world);
+    return saved == null ? [] : saved;
+  }
+
+  public function setCells(world : String, loaded : Array<Int>) {
+    cells.set(world, loaded);
+    save();
+  }
+
   public function setFlags(scene : String, hiddenIds : Array<String>, groupIds : Array<Array<String>>) {
     if (hiddenIds.length == 0) hidden.remove(scene);
     else hidden.set(scene, hiddenIds);
@@ -74,6 +86,6 @@ class EditorPrefs {
 
   function save() {
     if (!FileSystem.exists(DIRECTORY)) FileSystem.createDirectory(DIRECTORY);
-    File.saveContent(FILE, haxe.Json.stringify({recent: recent, hidden: hidden, groups: groups, layoutVersion: layoutVersion, hiddenMarkers: hiddenMarkers}, null, "  "));
+    File.saveContent(FILE, haxe.Json.stringify({recent: recent, hidden: hidden, groups: groups, cells: cells, layoutVersion: layoutVersion, hiddenMarkers: hiddenMarkers}, null, "  "));
   }
 }

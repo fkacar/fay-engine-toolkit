@@ -48,4 +48,8 @@ class SetTransformCommand implements Command {
   public function undo() {
     apply(entity, before);
   }
+
+  public function touched() {
+    return [entity];
+  }
 }

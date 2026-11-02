@@ -96,6 +96,48 @@ Rota için `RouteMarker`'dan türeyin ve `WaypointMarker`'ı da kaydedin. Noktal
 
 Zeminin yüksekliğini bilen oyun `level.provide(GroundHeight, terrain)` çağırır, işaretçiler zemine oturur ve `z` zeminden yükseklik olur. Verilmezse `z` olduğu gibi kullanılır.
 
+## Dünya
+
+Dünya isteğe bağlıdır. Tek sahneyle çalışan oyun bu bölümü atlar. Veri ve araçlar toolkit'tedir, çizim oyuna aittir: görsellik oyundan oyuna değişir.
+
+```
+res/world/main.world.json      ızgara, arazi katmanları
+res/world/global.scene.json    hücreye bağlı olmayan nesneler
+res/world/environment.json     saat, güneş, sis
+res/world/c_3_2.scene.json     hücrenin nesneleri, sahneyle aynı biçim
+res/world/c_3_2.terrain.json   yükseklik ve boya
+res/world/c_3_2.scatter.json   dağıtılan nesneler
+res/world/c_3_2.nav.json       yol ağı
+```
+
+Bağlamak için:
+
+1. Oyun `WorldView` arayüzünü yazar: arazi ve dağıtma çizimi, dağıtma türleri, hava durumu hazır ayarları, ortamın uygulanması.
+2. Oyun `WorldData.read` ile `WorldState` kurar ve `state.view` verir.
+3. Editörde `state.loadAllTerrain()` ve `new Editor(level, "res/world/main.world.json", state)`.
+4. Oyunda `new CellStreamer(state, level, true)`, `start(x, y)` ve her karede `update(x, y)`.
+5. Derleme kontrolü için `common.hxml` içine `--macro scene.macro.SceneCheck.run("res/world")`.
+
+Editörde yeni dünya oluşturma komutu yoktur, ilk `main.world.json` elle yazılır. Olmayan arazi dosyası düz arazi sayılır, ilk kayıtta oluşur.
+
+Bileşenler iki yerden dünyaya katılır:
+
+```haxe
+// Yol ağında yürünemeyen alan
+override public function navShapes() {
+  return [NavShapes.box(entity.object.getAbsPos(), width, depth)];
+}
+
+// Hücresinden çıkıp oyuncunun yanına gelen şey hücreyle birlikte silinmesin
+override public function keepsCell(isNear : (Float, Float) -> Bool) {
+  return Lambda.exists(units, unit -> isNear(unit.x, unit.y));
+}
+```
+
+`CellStreamer` hücreyi `objectRadius` halkasında yükler, bir hücre dışına çıkınca boşaltır. Arazi `terrainRadius` halkasında kalır. Oyun sürerken gelen hücrelerde `onStart` da çalışır.
+
+Yol bulma `NavWorld.findPath` ile yapılır. Hücre başına düğüm ızgarasıdır, saf Haxe'dir, yerel kütüphane gerektirmez. Hücreler ilk gerektiğinde okunur, yol ağı olmayan hücre yürünebilir sayılır. Recast'e geçilirse `NavWorld` ve `NavBaker` değişir, bileşenler etkilenmez.
+
 ## Prefab
 
 Prefab dosyası `res/prefabs/ad.prefab.json`, tek köklü küçük bir sahnedir. Sahne yalnızca kök satırını tutar: `prefab` yolu ve `overrides` listesi. Alt nesneler yüklenirken açılır, kimlikleri `kök/parça` biçimindedir. Farklar elle izlenmez, kayıtta prefab'la karşılaştırılarak bulunur.
