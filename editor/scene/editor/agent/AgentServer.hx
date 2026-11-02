@@ -52,7 +52,12 @@ class AgentServer {
   static inline var DEFERRED = "\u0000bekliyor";
   static inline var WAIT_SECONDS = 10.;
 
+  public static inline var LOG_LIMIT = 100;
+
   public var error(default, null) : Null<String>;
+  // Etkinlik paneli için: son çağrılar, en yeni sonda.
+  public var log(default, null) : Array<{time : Float, tool : String, ok : Bool, summary : String, writes : Bool}> = [];
+  public var lastRequest(default, null) = 0.;
   public var calls(default, null) = 0;
   public var lastTool(default, null) = "";
 
@@ -277,11 +282,34 @@ class AgentServer {
     lastTool = name;
     try {
       var result = tool.run(arguments);
+      remember(tool, true, summarize(arguments));
       if (result.wait != null) return result;
       return content(result);
     } catch (e : Dynamic) {
+      remember(tool, false, Std.string(e));
       return {content: [{type: "text", text: '$name çalışmadı: $e'}], isError: true};
     }
+  }
+
+  // Oyunun kendi araçları başka araçları çağırır: sonuç değer olarak döner, hata fırlatılır.
+  public function callTool(name : String, arguments : Dynamic) : Dynamic {
+    var tool = tools.get(name);
+    if (tool == null) throw 'Böyle bir araç yok: $name';
+    var result = tool.run(arguments);
+    return result.value != null ? result.value : result.text;
+  }
+
+  function remember(tool : AgentTool, ok : Bool, summary : String) {
+    lastRequest = haxe.Timer.stamp();
+    log.push({time: Date.now().getTime(), tool: tool.name, ok: ok, summary: summary.length > 160 ? summary.substr(0, 157) + "..." : summary, writes: !tool.readOnly});
+    if (log.length > LOG_LIMIT) log.shift();
+  }
+
+  static function summarize(arguments : Dynamic) : String {
+    if (arguments == null) return "";
+    if (arguments.label != null) return Std.string(arguments.label);
+    var text = haxe.Json.stringify(arguments);
+    return text == "{}" ? "" : text;
   }
 
   static function content(result : AgentReply) : Dynamic {

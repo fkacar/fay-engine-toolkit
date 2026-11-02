@@ -14,6 +14,7 @@ import scene.editor.agent.AgentServer;
 import scene.editor.agent.ContextTools;
 import scene.editor.agent.PlayTools;
 import scene.editor.agent.EditTools;
+import scene.editor.agent.ExamTools;
 import scene.nav.NavWorld;
 import scene.story.Dialog;
 import scene.world.WorldData;
@@ -37,7 +38,7 @@ typedef Panel = {
 class Editor {
   static inline var LAYOUT_FILE = "imgui.ini";
   // Düzen değişince artırılır: eski ölçülerle kaydedilmiş panel düzeni bir kez yenilenir.
-  static inline var LAYOUT_VERSION = 4;
+  static inline var LAYOUT_VERSION = 5;
   static inline var FONT_PATH = "libs/scene-toolkit/editor/fonts/DejaVuSansMono.ttf";
   static inline var FONT_SIZE = 15;
   static inline var HIERARCHY = "Hierarchy";
@@ -47,6 +48,7 @@ class Editor {
   static inline var WORLD = "Dünya";
   static inline var DATA = "Veri";
   static inline var DIALOGS = "Diyaloglar";
+  static inline var AGENT = "Ajan";
   static inline var DIRTY_POPUP = "Kaydedilmemiş değişiklik";
   static inline var SAVE_AS_POPUP = "Farklı kaydet";
   static inline var RECOVERY_POPUP = "Otomatik yedek";
@@ -169,9 +171,12 @@ class Editor {
     addPanel(DIALOGS, dialogPanel.draw);
 
     agent = new AgentServer(AgentServer.PORT, ContextTools.INSTRUCTIONS);
+    var agentPanel = new scene.editor.panels.AgentPanel(this);
+    addPanel(AGENT, agentPanel.draw);
     new ContextTools(this, agent);
     new PlayTools(this, agent);
     new EditTools(this, agent);
+    new ExamTools(this, agent);
     ContextTools.prompts(agent);
   }
 
@@ -723,6 +728,7 @@ class Editor {
     ImGui.dockBuilderDockWindow(WARNINGS, bottom);
     ImGui.dockBuilderDockWindow(DATA, bottom);
     ImGui.dockBuilderDockWindow(DIALOGS, bottom);
+    ImGui.dockBuilderDockWindow(AGENT, bottom);
     ImGui.dockBuilderDockWindow(ASSETS, bottom);
     ImGui.dockBuilderFinish(dock);
   }
