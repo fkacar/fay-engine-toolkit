@@ -1,6 +1,9 @@
 package scene.editor.agent;
 
 import scene.Entity;
+import scene.PlayFiles;
+import scene.data.SceneFormat;
+import scene.world.WorldData;
 import scene.editor.agent.AgentServer.AgentReply;
 import scene.nav.NavWorld;
 import sys.FileSystem;
@@ -14,14 +17,19 @@ class ExamTools {
   public static inline var SUFFIX = ".sinav.json";
   public static inline var RESULTS = "tests/ajan-sinavi/sonuclar.jsonl";
   public static inline var NEW = "$yeni";
+  // Görevin sınav dışında bıraktığı test dosyaları silinmez, buraya taşınır.
+  public static inline var LEFTOVERS = ".editor/sinav-artiklari";
   static inline var REACH = 2.;
 
   var editor : Editor;
-  var current : Null<{id : String, task : Dynamic, base : Baseline}>;
+  var server : AgentServer;
+  // origin: hazırlıktan önce (geri dönülecek hal), base: hazırlıktan sonra (ajanın başladığı hal).
+  var current : Null<{id : String, task : Dynamic, origin : Baseline, base : Baseline}>;
   var results : Array<Dynamic> = [];
 
   public function new(editor : Editor, server : AgentServer) {
     this.editor = editor;
+    this.server = server;
     function tool(name : String, description : String, properties : Dynamic, run : Dynamic->Dynamic, ?required : Array<String>) {
       var schema : Dynamic = {type: "object", properties: properties};
       if (required != null) schema.required = required;
@@ -35,7 +43,7 @@ class ExamTools {
     }, finish, ["model"]);
     server.addPrompt({name: "sinav", description: "Ajan sınavını çalıştır ve puanla",
       arguments: [{name: "elle", description: "Elle puanlanan görevler, örn. M1=2 M2=1 M3=2", required: false}],
-      text: args -> (args.elle == null || args.elle == "" ? "" : 'Elle puanlar: ${args.elle}. Bunları finish_exam\'in manual alanına yaz. ') + "Ajan sınavı. list_exam ile görevleri al. Her görev için sırayla start_exam_task ile başlat; görevi tasarımcı istemiş gibi yalnızca editör araçlarıyla yap, soru sorma, kaydetme; bitince check_exam_task çağır. Araç puanlar ve değişikliklerini geri alır. Hepsi bitince finish_exam'e model adını ver. Sonucu görev başına puanla bir tablo olarak göster, önceki sonuçla farkı ve kalan kontrolleri söyle."});
+      text: args -> (args.elle == null || args.elle == "" ? "" : 'Elle puanlar: ${args.elle}. Bunları finish_exam\'in manual alanına yaz. ') + "Ajan sınavı. list_exam ile görevleri al. Her görev için sırayla start_exam_task ile başlat; görevi tasarımcı istemiş gibi editör araçlarıyla yap, soru sorma, görev istemedikçe kaydetme; bitince check_exam_task çağır. Araç puanlar ve değişikliklerini geri alır. Hepsi bitince finish_exam'e model adını ver. Sonucu görev başına puanla bir tablo olarak göster, önceki sonuçla farkı ve kalan kontrolleri söyle."});
   }
 
   function list() : Dynamic {
@@ -48,24 +56,34 @@ class ExamTools {
   function start(id : String) : Dynamic {
     if (current != null) throw 'Açık görev var: ${current.id}. Önce check_exam_task.';
     var task = read(id);
-    current = {id: id, task: task, base: baseline()};
+    var origin = baseline();
+    if (task.allowSave == true && !origin.clean)
+      throw 'Bu görev kaydetmeyi gerektirir. Önce kaydedilmemiş işini kaydet: ${editor.document.unsavedFiles().join(", ")}';
+    var steps : Array<Dynamic> = task.setup == null ? [] : task.setup;
+    try {
+      for (step in steps) server.callTool(step.tool, prepare(step.arguments));
+    } catch (e : Dynamic) {
+      restore(origin);
+      throw 'Sınav hazırlığı çalışmadı: $e';
+    }
+    current = {id: id, task: task, origin: origin, base: baseline()};
     return {id: id, title: task.title, prompt: task.prompt};
   }
 
   function check() : Dynamic {
     if (current == null) throw "Açık görev yok. Önce start_exam_task.";
-    var task = current.task, base = current.base;
+    var task = current.task, base = current.base, origin = current.origin;
     editor.document.validate();
     var checks : Array<Dynamic> = task.checks;
     var outcome = [for (spec in checks) {
-      var result = try evaluate(spec, base) catch (e : Dynamic) {ok: false, detail: 'denetlenemedi: $e'};
+      var result = try evaluate(spec, base, origin) catch (e : Dynamic) {ok: false, detail: 'denetlenemedi: $e'};
       {check: spec.label != null ? spec.label : spec.type, ok: result.ok, detail: result.detail};
     }];
     var steps = editor.commands.undoCount - base.undoCount;
     var seconds = Math.round(haxe.Timer.stamp() - base.time);
-    restore(base);
+    var cleanup = restore(origin);
     var passed = outcome.filter(item -> item.ok).length;
-    var result = {id: current.id, passed: passed, total: outcome.length, steps: steps, seconds: seconds, checks: outcome};
+    var result = {id: current.id, passed: passed, total: outcome.length, steps: steps, seconds: seconds, checks: outcome, restored: cleanup};
     results = results.filter(other -> other.id != current.id);
     results.push(result);
     current = null;
@@ -101,17 +119,43 @@ class ExamTools {
     return {result: line, previous: previous == null ? null : {date: previous.date, model: previous.model, passed: previous.passed, total: previous.total}, file: RESULTS};
   }
 
-  function evaluate(spec : Dynamic, base : Baseline) : {ok : Bool, detail : String} {
+  // Hazırlık ve kontroller hazırlıktan önceki hale göre: hazırlığın bozduğu şey düzelmeden geçmez.
+  function evaluate(spec : Dynamic, base : Baseline, origin : Baseline) : {ok : Bool, detail : String} {
     var created = [for (entity in editor.scene.entities) if (!base.entities.exists(entity.id)) entity];
     switch (spec.type) {
       case "created":
         var found = created.filter(entity -> matches(entity, spec.components, base) && (spec.near == null || within(entity, spec.near.entity, spec.near.distance)));
         var wanted : Int = spec.atLeast == null ? 1 : spec.atLeast;
         return {ok: found.length >= wanted, detail: '${found.length} uygun yeni nesne (${created.length} yeni)'};
-      case "route_walkable", "route_near":
+      case "entity":
+        var target = named(spec.name);
+        if (target == null) return {ok: false, detail: '${spec.name} yok veya yüklü değil'};
+        return {ok: matches(target, spec.components, base), detail: [for (c in target.components) describe(c)].join("; ")};
+      case "walkable":
+        var nav = editor.scene.service(NavWorld);
         var owners = created.filter(entity -> matches(entity, [{type: spec.component}], base));
-        if (owners.length == 0) return {ok: false, detail: '${spec.component} bileşenli yeni nesne yok'};
+        var blocked = owners.filter(entity -> !nav.isWalkable(entity.object.getAbsPos().tx, entity.object.getAbsPos().ty));
+        return {ok: owners.length > 0 && blocked.length == 0, detail: owners.length == 0 ? '${spec.component} bileşenli yeni nesne yok' : blocked.length == 0 ? '${owners.length} nesne yürünebilir yerde' : 'yürünemez yerde: ${[for (e in blocked) e.name].join(", ")}'};
+      case "quest_test":
+        var fresh = [for (name in PlayTests.list()) if (base.tests.indexOf(name) < 0) name];
+        if (fresh.length == 0) return {ok: false, detail: "res/tests altına yeni test yazılmadı"};
+        var name = PlayTests.lastName;
+        if (name == null || fresh.indexOf(name) < 0) return {ok: false, detail: 'yeni test (${fresh.join(", ")}) çalıştırılmadı'};
+        var steps : Array<Dynamic> = try PlayTests.load(name).steps catch (e : Dynamic) [];
+        if (spec.item != null && !Lambda.exists(steps, step -> step.expect != null && step.expect.item == spec.item))
+          return {ok: false, detail: '$name testi ${spec.item} eşyasını beklemiyor'};
+        var result = PlayTests.result();
+        if (result == null || FileSystem.stat(PlayFiles.RESULT).mtime.getTime() < base.wall - 1000) return {ok: false, detail: '$name için sonuç yok'};
+        var failures : Array<String> = result.failures == null ? [] : result.failures;
+        return {ok: result.passed == true, detail: result.passed == true ? '$name oyunda geçti' : '$name kaldı: ${failures.join("; ")}'};
+      case "route_walkable", "route_near":
         var field : String = spec.field == null ? "route" : spec.field;
+        var owners = created.filter(entity -> matches(entity, [{type: spec.component}], base));
+        if (spec.ifAny == true) {
+          owners = owners.filter(entity -> Std.string(component(entity, spec.component).readField(field)) != "");
+          if (owners.length == 0) return {ok: true, detail: "rotalı yeni nesne yok"};
+        }
+        if (owners.length == 0) return {ok: false, detail: '${spec.component} bileşenli yeni nesne yok'};
         var problems = [];
         for (owner in owners) {
           var route = editor.scene.find(Std.string(component(owner, spec.component).readField(field)));
@@ -133,22 +177,19 @@ class ExamTools {
           } else {
             var distance : Float = spec.distance == null ? 20 : spec.distance;
             for (name in [spec.from, spec.to]) {
-              var target = named(name);
-              if (target == null) problems.push('$name yok');
-              else {
-                var at = target.object.getAbsPos();
-                if (!Lambda.exists(points, point -> Math.sqrt(Math.pow(point.tx - at.tx, 2) + Math.pow(point.ty - at.ty, 2)) <= distance))
-                  problems.push('${route.name} $name\'e $distance m yaklaşmıyor');
-              }
+              var at = positionOf(name);
+              if (at == null) problems.push('$name yok');
+              else if (!Lambda.exists(points, point -> Math.sqrt(Math.pow(point.tx - at[0], 2) + Math.pow(point.ty - at[1], 2)) <= distance))
+                problems.push('${route.name} $name\'e $distance m yaklaşmıyor');
             }
           }
         }
         return {ok: problems.length == 0, detail: problems.length == 0 ? 'uygun' : problems.join("; ")};
       case "no_new_warnings":
-        var fresh = [for (issue in editor.document.issues) if (!base.issues.exists(issue.message)) issue.message];
+        var fresh = [for (issue in editor.document.issues) if (!origin.issues.exists(issue.message)) issue.message];
         return {ok: fresh.length == 0, detail: fresh.length == 0 ? "yeni uyarı yok" : fresh.join("; ")};
       case "story_clean":
-        var fresh = [for (found in StoryIndex.issues(StoryIndex.build(editor))) if (!base.story.exists(found.message)) found.message];
+        var fresh = [for (found in StoryIndex.issues(StoryIndex.build(editor))) if (!origin.story.exists(found.message)) found.message];
         return {ok: fresh.length == 0, detail: fresh.length == 0 ? "hikâye bağları tam" : fresh.join("; ")};
       case "unchanged":
         var steps = editor.commands.undoCount - base.undoCount;
@@ -175,7 +216,9 @@ class ExamTools {
         return {ok: added.length >= wanted, detail: '${added.length} yeni satır: ${added.join(", ")}'};
       case "dialog_created":
         var types : Array<String> = spec.nodeTypes == null ? [] : spec.nodeTypes;
-        var fresh = [for (id in editor.dialogs.ids()) if (base.dialogs.indexOf(id) < 0) editor.dialogs.dialogs.get(id)];
+        // id verilirse o diyaloğa bakılır (hazırlıkta kurulan), yoksa görevde oluşturulanlara.
+        var fresh = spec.id != null ? [for (id in editor.dialogs.ids()) if (id == spec.id) editor.dialogs.dialogs.get(id)]
+          : [for (id in editor.dialogs.ids()) if (base.dialogs.indexOf(id) < 0) editor.dialogs.dialogs.get(id)];
         var ok = Lambda.exists(fresh, dialog -> Lambda.foreach(types, type -> Lambda.exists(dialog.nodes, node -> node.type == type)));
         return {ok: ok, detail: fresh.length == 0 ? "yeni diyalog yok" : [for (dialog in fresh) '${dialog.id}: ${[for (node in dialog.nodes) node.type].join(" ")}'].join("; ")};
       default:
@@ -202,10 +245,50 @@ class ExamTools {
   }
 
   function within(entity : Entity, name : String, distance : Float) : Bool {
-    var target = named(name);
-    if (target == null) return false;
-    var a = entity.object.getAbsPos(), b = target.object.getAbsPos();
-    return Math.sqrt(Math.pow(a.tx - b.tx, 2) + Math.pow(a.ty - b.ty, 2)) <= distance;
+    var b = positionOf(name);
+    if (b == null) return false;
+    var a = entity.object.getAbsPos();
+    return Math.sqrt(Math.pow(a.tx - b[0], 2) + Math.pow(a.ty - b[1], 2)) <= distance;
+  }
+
+  // Yüklü nesne, yoksa yüklü olmayan hücrelerdeki kök nesne (diskten).
+  function positionOf(name : String) : Null<Array<Float>> {
+    var entity = named(name);
+    if (entity != null) {
+      var at = entity.object.getAbsPos();
+      return [at.tx, at.ty];
+    }
+    var world = editor.document.world;
+    if (world == null) return null;
+    var wanted = name.toLowerCase();
+    for (cell in world.data.cells()) {
+      if (world.isLoaded(cell)) continue;
+      var text = DiskGuard.read("res/" + world.data.path(cell, WorldData.OBJECTS_SUFFIX));
+      if (text == null) continue;
+      for (item in SceneFormat.read(text).entities)
+        if (item.parent == null && (item.name.toLowerCase() == wanted || item.id == name)) return [item.position[0], item.position[1]];
+    }
+    return null;
+  }
+
+  static function describe(component : Component) : String {
+    return '${component.componentId()} ${[for (field in component.describeFields()) '${field.name}=${component.readField(field.name)}'].join(" ")}';
+  }
+
+  // Hazırlıkta {"$near": ad, "offset": [x, y]} o nesnenin konumuna çevrilir.
+  function prepare(value : Dynamic) : Dynamic {
+    if (value == null || Std.isOfType(value, String) || Std.isOfType(value, Float) || Std.isOfType(value, Bool)) return value;
+    if (Std.isOfType(value, Array)) return [for (item in (value : Array<Dynamic>)) prepare(item)];
+    var near : Null<String> = Reflect.field(value, "$near");
+    if (near != null) {
+      var at = positionOf(near);
+      if (at == null) throw '$near yok';
+      var offset : Array<Float> = value.offset == null ? [0, 0] : value.offset;
+      return [at[0] + offset[0], at[1] + offset[1]];
+    }
+    var copy : Dynamic = {};
+    for (field in Reflect.fields(value)) Reflect.setField(copy, field, prepare(Reflect.field(value, field)));
+    return copy;
   }
 
   function isNew(value : String, base : Baseline) : Bool {
@@ -230,6 +313,10 @@ class ExamTools {
     var orbit = editor.viewport.camera;
     return {
       time: haxe.Timer.stamp(),
+      wall: Date.now().getTime(),
+      clean: editor.document.unsavedFiles().length == 0,
+      tests: PlayTests.list(),
+      objectFiles: editor.document.world == null ? [] : editor.document.world.objectFiles(),
       undoCount: editor.commands.undoCount,
       entities: [for (entity in editor.scene.entities) entity.id => true],
       issues: [for (issue in editor.document.issues) issue.message => true],
@@ -241,11 +328,36 @@ class ExamTools {
     };
   }
 
-  function restore(base : Baseline) {
+  // Geri alır; görev kaydettiyse ve önceden kaydedilmemiş iş yoksa disk de eski haline yazılır.
+  // Görevde yazılan test dosyaları LEFTOVERS altına taşınır.
+  function restore(base : Baseline) : Dynamic {
     while (editor.commands.undoCount > base.undoCount) editor.commands.undo();
+    var saved = false, note : Null<String> = null, dropped = [];
+    if (editor.commands.isDirty) {
+      if (base.clean) {
+        saved = editor.document.save();
+        var world = editor.document.world;
+        if (saved && world != null)
+          for (path in world.objectFiles()) if (base.objectFiles.indexOf(path) < 0 && world.dropEmptyObjectFile(path)) dropped.push('res/$path');
+      } else note = "Görev sırasında kaydedildi; disk sınav öncesinden farklı. Kaydedersen senin halin yazılır.";
+    }
+    var moved = [];
+    var fresh = [for (name in PlayTests.list()) if (base.tests.indexOf(name) < 0) name];
+    if (fresh.length > 0) {
+      var target = '$LEFTOVERS/${DateTools.format(Date.now(), "%Y%m%d-%H%M%S")}';
+      if (!FileSystem.exists(target)) FileSystem.createDirectory(target);
+      for (name in fresh) {
+        var file = '$name${PlayFiles.TEST_SUFFIX}';
+        FileSystem.rename('${PlayFiles.TESTS}/$file', '$target/$file');
+        moved.push('$target/$file');
+      }
+    }
     editor.document.validate();
     editor.viewport.camera.place(base.camera.target, base.camera.distance, base.camera.yaw, base.camera.pitch);
     editor.selection.set([for (id in base.selection) if (editor.scene.find(id) != null) editor.scene.find(id)]);
+    var result : Dynamic = {saved: saved, movedTests: moved, removedEmptyFiles: dropped};
+    if (note != null) result.note = note;
+    return result;
   }
 
   function ids() : Array<String> {
@@ -284,6 +396,10 @@ class ExamTools {
 
 typedef Baseline = {
   time : Float,
+  wall : Float,
+  clean : Bool,
+  tests : Array<String>,
+  objectFiles : Array<String>,
   undoCount : Int,
   entities : Map<String, Bool>,
   issues : Map<String, Bool>,

@@ -330,6 +330,7 @@ class Editor {
     var problem = startPlayTest(test, true);
     if (problem != null) show(problem, true);
     else {
+      PlayTests.lastName = name;
       designerTest = name;
       show('Görev testi oynuyor: $name');
     }

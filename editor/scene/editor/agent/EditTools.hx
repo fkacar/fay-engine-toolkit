@@ -1,5 +1,7 @@
 package scene.editor.agent;
 
+import haxe.io.Path;
+import sys.FileSystem;
 import scene.Component;
 import scene.Entity;
 import scene.FieldInfo;
@@ -32,6 +34,11 @@ import scene.story.DialogLayout;
 class EditTools {
   static inline var SEARCH_STEP = 1.;
   static inline var SEARCH_RADIUS = 30.;
+  static inline var RESOURCE_DIRECTORY = "res";
+  static inline var IMPORT_WAIT_FRAMES = 3;
+  static inline var IMPORT_TIMEOUT = 30.;
+
+  static var MODEL_TYPES = ["fbx", "hmd"];
 
   var editor : Editor;
 
@@ -47,7 +54,7 @@ class EditTools {
       + "create {key?, name, type? (bileşen veya işaretçi kimliği, örn. spawn, patrol_route, trigger), prefab? (yol), position [x,y] veya [x,y,z], rotationDegrees?, parent? (kimlik veya $key), fields? (type bileşeninin alanları), components? [{type, fields}], waypoints? [[x,y],...] (rota işaretçisi için)}\n"
       + "set {id, name?, position?, rotationDegrees?, scale?, visibleInGame?, components? [{type, fields}]}\n"
       + "add_component {id, type, fields?} · remove_component {id, type} · delete {ids}\n"
-      + "Alan adı kimlik veya Inspector etiketi olabilir. Bir alan aynı çağrıda oluşturulan nesneyi \"$key\" ile gösterebilir. x,y verilince z zemine oturur (işaretçide z zeminden yüksekliktir).", {
+      + "Alan adı kimlik veya Inspector etiketi olabilir. Bir alan aynı çağrıda oluşturulan nesneyi \"$key\" ile gösterebilir. x,y verilince nesne sürükleyip bırakmadaki gibi zemine oturur: en alt noktası zemine değer (işaretçide z zeminden yüksekliktir). [x,y,z] verilirse z olduğu gibi yazılır.", {
       label: {type: "string", description: "Geçmişte görünecek ad, örn. kasabaya devriye"},
       operations: {type: "array", items: {type: "object"}},
       expectedRevision: revision,
@@ -76,6 +83,10 @@ class EditTools {
     tool("find_path", "İki nokta arasında yürünebilir yol: noktalar, uzunluk ve hedefe varılıp varılmadığı.", {
       from: {type: "array", items: {type: "number"}}, to: {type: "array", items: {type: "number"}},
     }, args -> path(args.from, args.to), true, ["from", "to"]);
+    tool("list_models", "Modeller. models: res altındaki yerleştirilebilir modeller; model bileşeninin path alanına bu yol yazılır. notImported: assets altında olup içe aktarılmamış veya kaynağı sonradan değişmiş FBX'ler, import_model ile alınır.", {}, _ -> listModels(), true);
+    server.add({name: "import_model", readOnly: false, run: importModel,
+      description: "assets altındaki bir FBX'i Asset Browser'daki Model içe aktar gibi dönüştürür, res/models altına yazar. Dosya işidir, geri alma adımı değildir; yeniden alınca sahnelerdeki yol değişmez. Büyük modelde editör bir süre tepki vermez. Dönen path'i model bileşenine yaz.",
+      schema: {type: "object", properties: {source: {type: "string", description: "assets yolu veya dosya adının bir parçası"}}, required: ["source"]}});
   }
 
   function editScene(args : Dynamic) : Dynamic {
@@ -143,15 +154,24 @@ class EditTools {
           for (point in points) items.push(editor.actions.waypointData(id, point[0] - item.position[0], point[1] - item.position[1]));
         }
         run(new AddEntitiesCommand(editor.scene, items, label));
+        if (!isMarker && item.parent == null && (operation.position : Array<Dynamic>).length < 3) {
+          var entity = editor.scene.find(id);
+          var before = SetTransformCommand.capture(entity);
+          if (editor.actions.sitOnGround(entity) && !SetTransformCommand.same(before, SetTransformCommand.capture(entity)))
+            run(new SetTransformCommand(entity, before, SetTransformCommand.capture(entity)));
+        }
         created.push(id);
       case "set":
         var entity = existing(operation.id, created);
         if (operation.name != null) run(new SetNameCommand(entity, entity.name, operation.name));
         if (operation.position != null || operation.rotationDegrees != null || operation.scale != null) {
           var before = SetTransformCommand.capture(entity);
+          var settle = false;
           if (operation.position != null) {
-            var at = place(operation.position, Lambda.exists(entity.components, c -> Std.isOfType(c, Marker)));
+            var isMarker = Lambda.exists(entity.components, c -> Std.isOfType(c, Marker));
+            var at = place(operation.position, isMarker);
             entity.setPosition(at[0], at[1], at[2]);
+            settle = !isMarker && entity.parent == null && (operation.position : Array<Dynamic>).length < 3;
           }
           if (operation.rotationDegrees != null) {
             var turn = rotation(operation.rotationDegrees);
@@ -161,6 +181,7 @@ class EditTools {
             var size = Std.isOfType(operation.scale, Array) ? (operation.scale : Array<Float>) : [operation.scale, operation.scale, operation.scale];
             entity.setScale(size[0], size[1], size[2]);
           }
+          if (settle) editor.actions.sitOnGround(entity);
           run(new SetTransformCommand(entity, before, SetTransformCommand.capture(entity)));
         }
         if (operation.visibleInGame != null) run(new SetActiveCommand(entity, operation.visibleInGame == true));
@@ -471,6 +492,54 @@ class EditTools {
     var end = points.length == 0 ? null : points[points.length - 1];
     var reached = nav.isWalkable(to[0], to[1]) && end != null && Math.abs(end.x - to[0]) + Math.abs(end.y - to[1]) < 2;
     return {reached: reached, startWalkable: nav.isWalkable(from[0], from[1]), length: round(length), points: [for (point in points) [round(point.x), round(point.y)]]};
+  }
+
+  function listModels() : Dynamic {
+    var models = [];
+    collectModels(RESOURCE_DIRECTORY, models);
+    models.sort(Reflect.compare);
+    return {models: models, notImported: editor.importer.pending()};
+  }
+
+  function collectModels(directory : String, found : Array<String>) {
+    if (!FileSystem.exists(directory)) return;
+    for (name in FileSystem.readDirectory(directory)) {
+      if (StringTools.startsWith(name, ".")) continue; // Heaps'in .tmp önbelleği, Asset Browser da göstermez
+      var path = '$directory/$name';
+      if (FileSystem.isDirectory(path)) collectModels(path, found);
+      else if (MODEL_TYPES.indexOf(Path.extension(name).toLowerCase()) >= 0) found.push(path.substr(RESOURCE_DIRECTORY.length + 1));
+    }
+  }
+
+  // Asset Browser gibi: dönüştürme birkaç kare sonra başlar, tasarımcı durum satırında ne olduğunu görür.
+  function importModel(args : Dynamic) : AgentReply {
+    var source = modelSource(args.source);
+    editor.show('Ajan modeli dönüştürüyor: $source. Büyük modellerde editör bir süre tepki vermez');
+    var frames = IMPORT_WAIT_FRAMES;
+    return {timeout: IMPORT_TIMEOUT, wait: function() : Null<AgentReply> {
+      if (--frames > 0) return null;
+      var result = editor.importer.run(source);
+      for (problem in result.problems) editor.report(problem);
+      if (result.target == null) {
+        editor.show("İçe aktarılamadı, ayrıntı Uyarılar panelinde", true);
+        throw result.problems.join("; ");
+      }
+      AssetImporter.forgetMissingFiles();
+      editor.document.validate();
+      editor.show('İçe aktarıldı: ${result.target} (${result.triangles} üçgen, ${result.parts} parça)');
+      return {value: {source: source, path: result.target.substr(RESOURCE_DIRECTORY.length + 1), triangles: result.triangles, parts: result.parts, problems: result.problems}};
+    }};
+  }
+
+  function modelSource(wanted : String) : String {
+    if (wanted == null || wanted == "") throw "source boş";
+    var sources = editor.importer.sources();
+    var needle = StringTools.replace(wanted, "\\", "/").toLowerCase();
+    for (source in sources) if (source.toLowerCase() == needle) return source;
+    var found = sources.filter(source -> source.toLowerCase().indexOf(needle) >= 0);
+    if (found.length == 1) return found[0];
+    if (found.length == 0) throw 'assets altında böyle bir FBX yok: $wanted. FBX\'ler: ${sources.length == 0 ? "yok" : sources.join(", ")}';
+    throw '"$wanted" birden çok FBX ile eşleşiyor: ${found.join(", ")}';
   }
 
   function checkRevision(expected : Null<Int>) {

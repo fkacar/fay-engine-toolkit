@@ -26,10 +26,15 @@ class AssetImporter {
   public function new() {}
 
   public function pending() : Array<String> {
+    return sources().filter(needsImport);
+  }
+
+  // `assets` altındaki bütün FBX'ler, içe aktarılmış olanlar dahil.
+  public function sources() : Array<String> {
     var found = [];
     collect(SOURCE_DIRECTORY, found);
     found.sort(Reflect.compare);
-    return found.filter(needsImport);
+    return found;
   }
 
   public function targetOf(source : String) {

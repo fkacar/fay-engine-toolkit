@@ -34,7 +34,9 @@ class PlayTools {
       run: args -> {
         var test = PlayTests.load(args.name);
         if (test == null) throw 'Görev testi yok veya okunamadı: ${args.name}. Testler: ${PlayTests.list().join(", ")}';
-        return run(test);
+        var reply = run(test);
+        PlayTests.lastName = args.name;
+        return reply;
       }});
     server.add({name: "playtest", readOnly: true,
       description: "Kaydedilmemiş bir görev testi tarifini oyunda oynar (run_quest_test ile aynı biçim, steps zorunlu). Ne olduğunu denemek ve bir hatayı yeniden üretmek için. Dünya kayıtlı haliyle açılır.",
@@ -44,7 +46,11 @@ class PlayTools {
         steps: {type: "array", items: {type: "object"}},
         timeout: {type: "number"},
       }, required: ["steps"]},
-      run: args -> run(args)});
+      run: args -> {
+        var reply = run(args);
+        PlayTests.lastName = null;
+        return reply;
+      }});
   }
 
   function run(test : Dynamic) : AgentReply {

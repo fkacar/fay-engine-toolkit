@@ -147,9 +147,7 @@ class SceneActions {
     item.components.push(component);
 
     var entity = add([item], "Model ekle")[0];
-    if (hit == null) return;
-    var offset = groundOffset(entity);
-    if (offset != null) shift(entity, new Vec3(0, 0, offset));
+    if (hit != null) sitOnGround(entity);
   }
 
   public function isPrefab(path : String) {
@@ -399,6 +397,14 @@ class SceneActions {
     var top = box.isEmpty() ? at.z : box.zMax;
     var hit = groundHit(Ray.fromValues(at.x, at.y, top + GROUND_SEARCH, 0, 0, -1));
     return hit == null ? null : hit.z - bottom;
+  }
+
+  // Sürükleyip bırakmadaki kural: nesnenin en alt noktası zemine değer. Zemin bulunmazsa yerinde kalır.
+  public function sitOnGround(entity : Entity) : Bool {
+    var offset = groundOffset(entity);
+    if (offset == null) return false;
+    shift(entity, new Vec3(0, 0, offset));
+    return true;
   }
 
   static function distanceAlong(ray : Ray, point : Point) {

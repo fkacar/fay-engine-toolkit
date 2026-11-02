@@ -492,6 +492,21 @@ class WorldDocument {
     return binaryOnDisk(path);
   }
 
+  // Nesne dosyası olan hücreler (res'e göre yollar).
+  public function objectFiles() : Array<String> {
+    return [for (cell in [WorldData.GLOBAL].concat(data.cells())) if (sys.FileSystem.exists(ROOT + data.path(cell, WorldData.OBJECTS_SUFFIX))) data.path(cell, WorldData.OBJECTS_SUFFIX)];
+  }
+
+  // Ajan sınavı geri alınınca: görevden önce olmayan, artık boş nesne dosyası hiç yazılmamış gibi kalkar.
+  // İçinde nesne olan dosyaya dokunulmaz.
+  public function dropEmptyObjectFile(path : String) : Bool {
+    var text = DiskGuard.read(ROOT + path);
+    if (text == null || !StringTools.endsWith(path, WorldData.OBJECTS_SUFFIX) || SceneFormat.read(text).entities.length > 0) return false;
+    editor.diskGuard.delete(ROOT + path);
+    disk.set(path, null);
+    return true;
+  }
+
   function diskText(path : String) : Null<String> {
     if (!disk.exists(path)) {
       var text = DiskGuard.read(ROOT + path);

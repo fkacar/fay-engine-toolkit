@@ -6,6 +6,9 @@ import sys.io.File;
 
 // Görev testi dosyaları ve editörle oyun arasındaki sonuç dosyası.
 class PlayTests {
+  // Son çalıştırılan kayıtlı testin adı; tarifle (playtest) çalışınca boş.
+  public static var lastName : Null<String>;
+
   public static function list() : Array<String> {
     if (!FileSystem.exists(PlayFiles.TESTS)) return [];
     var names = [for (file in FileSystem.readDirectory(PlayFiles.TESTS)) if (StringTools.endsWith(file, PlayFiles.TEST_SUFFIX)) file.substr(0, file.length - PlayFiles.TEST_SUFFIX.length)];
