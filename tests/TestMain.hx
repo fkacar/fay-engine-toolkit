@@ -18,6 +18,10 @@ import scene.world.TerrainCell;
 import scene.world.WorldData;
 import scene.world.WorldState;
 import scene.world.WorldTerrain;
+import scene.world.TerrainModelBaker;
+import scene.world.TerrainModels;
+import scene.world.TerrainSurface;
+import scene.world.WorldData.TerrainModel;
 import scene.world.WorldView;
 import scene.data.SceneData;
 import scene.data.SceneFormat;
@@ -128,6 +132,10 @@ class NavShapes {
   public static function circle(x : Float, y : Float, radius : Float) : NavShape {
     return {x: x, y: y, halfX: radius, halfY: radius, angle: 0, isRound: true};
   }
+
+  public static function polygon(points : Array<Float>) : NavShape {
+    return {x: points[0], y: points[1], halfX: 0, halfY: 0, angle: 0, isRound: false, points: points};
+  }
 }
 
 @:component("traveller")
@@ -151,6 +159,7 @@ class NullView implements WorldView {
   }
 
   public function environmentChanged() {}
+
 
   public function terrainChanged(cell : Int) {}
 
@@ -1291,7 +1300,7 @@ class TestMain {
     var state = new WorldState(world, _ -> null);
     state.view = new NullView();
     state.loadAllTerrain();
-    return {state: state, brush: new WorldBrush(state, editable, (terrain, scatter) -> if (calls != null) calls.push(terrain))};
+    return {state: state, brush: new WorldBrush(state, editable, cell -> editable(cell) && !state.terrain.get(cell).hasCoverage(), (terrain, scatter) -> if (calls != null) calls.push(terrain))};
   }
 
   static function testBrushes() {
@@ -1533,6 +1542,137 @@ class TestMain {
     equals(read.sun, environment.sun, "kopya aslını değiştirmez");
   }
 
+  static function modelAt(x : Float, width : Float, rotation = 0.) : TerrainModel {
+    return {source: "assets/terrain/a.fbx", x: x, y: 0, base: 10, width: width, rotation: rotation, heightScale: 2, tiling: 4,
+      originX: 1, originY: 2, originZ: 3, originWidth: 2};
+  }
+
+  static function testTerrainModels() {
+    // Yerleşim: merkeze taşı, ölçekle, döndür
+    var model = modelAt(100, 20);
+    var point = TerrainModels.place(model, 2, 2, 4);
+    equals(point[0], 110, "genişliğe göre ölçek");
+    equals(point[1], 0, "merkez y");
+    equals(point[2], 30, "taban ve dikey çarpan");
+    var turned = TerrainModels.place(modelAt(0, 20, 90), 2, 2, 3);
+    check(Math.abs(turned[0]) < 1e-9 && Math.abs(turned[1] - 10) < 1e-9, 'dönüş: $turned');
+
+    // Dünya dosyası modeli ve eğimi taşır
+    var world = new WorldData("world", 2, 1, 40, 4, []);
+    world.maxSlope = 60;
+    world.terrainModels = [model];
+    var text = world.write();
+    var read = WorldData.read(text, "world");
+    equals(read.maxSlope, 60, "eğim okunmalı");
+    equals(read.terrainModels.length, 1, "model okunmalı");
+    equals(read.terrainModels[0].tiling, 4, "doku tekrarı okunmalı");
+    equals(read.write(), text, "dünya dosyası kararlı");
+    equals(new WorldData("world", 2, 1, 40, 4, []).write().indexOf('"terrainModels": []') >= 0, true, "boş liste tek satır");
+
+    // Yeniden örnekleme
+    var cell = TerrainCell.flat(4, 2);
+    cell.setHeight(4, 4, 10);
+    cell.setLayer(3, 3, 2);
+    var fine = cell.resample(8);
+    equals(fine.resolution, 8, "yeni çözünürlük");
+    equals(fine.height(8, 8), 10, "köşe korunmalı");
+    equals(fine.height(7, 7), 4, "ara değer çift doğrusal");
+    equals(fine.layer(7, 7), 2, "boya en yakın kareden");
+    equals(fine.resample(4).height(4, 4), 10, "geri örnekleme");
+
+    // Hücre başına çözünürlük: ince hücre de doğru yüksekliği verir
+    var terrain = new WorldTerrain(world);
+    terrain.set(0, TerrainCell.flat(4, 1));
+    terrain.set(1, fine);
+    equals(terrain.heightAt(-10, 0), 1, "kaba hücre");
+    check(Math.abs(terrain.heightAt(39.99, 19.99) - 10) < 0.1, 'ince hücrenin köşesi: ${terrain.heightAt(39.99, 19.99)}');
+    equals(terrain.vertexHeight(4, 0), 1, "fırça köşesi dünya çözünürlüğündeki hücreden okunur");
+
+    // Modelden yükseklik: hücrenin sol yarısını kaplayan z = 5 düzlemi
+    var flat = new WorldData("world", 1, 1, 90, 2, []);
+    var base = new WorldTerrain(flat);
+    base.set(0, TerrainCell.flat(2, 1));
+    var positions = [-45., -45, 5, 0, -45, 5, 0, 45, 5, -45, 45, 5];
+    var baked = TerrainModelBaker.bake(flat, base.get, positions, [0, 1, 2, 0, 2, 3]).get(0);
+    equals(baked.resolution, TerrainModelBaker.RESOLUTION, "model hücresi ince örneklenir");
+    equals(baked.height(0, 0), 5, "model altında model yüksekliği");
+    equals(baked.height(90, 0), 1, "model dışında eski yükseklik");
+    equals(baked.layer(10, 10), TerrainCell.COVERED, "model altındaki kareyi model çizer");
+    equals(baked.layer(80, 10), 0, "model dışındaki kareyi oyun çizer");
+    check(baked.hasCoverage(), "kaplama bilinmeli");
+    var under = new WorldTerrain(flat);
+    under.set(0, baked);
+    equals(under.heightAt(-30, 0), 5, "model üstünde yükseklik");
+
+    // Model altındaki hücreye fırça dokunmaz, dağıtma çalışır
+    var test = brushWorld(_ -> true);
+    var covered = test.state.terrain.get(0).resample(TerrainModelBaker.RESOLUTION);
+    covered.setLayer(0, 0, TerrainCell.COVERED);
+    test.state.terrain.set(0, covered);
+    test.brush.tool = Raise;
+    test.brush.radius = 15;
+    test.brush.begin(-20, -20);
+    test.brush.apply(-20, -20, 1);
+    test.brush.finish();
+    equals(test.state.terrain.heightAt(-20, -20), 0, "model hücresi fırçayla değişmemeli");
+    test.brush.tool = Scatter;
+    test.brush.scatterType = "rock";
+    test.brush.density = 0.2;
+    test.brush.begin(-20, -20);
+    test.brush.apply(-20, -20, 0.1);
+    test.brush.finish();
+    check(test.state.scatter.get(0).items.length > 0, "model hücresine dağıtma yapılmalı");
+  }
+
+  // Model hücrelere ağırlık merkezine göre bölünür, aynı model aynı baytları verir.
+  static function testSurfaces() {
+    var world = new WorldData("world", 2, 1, 20, 2, []);
+    var group = {
+      texture: "world/textures/a.jpg",
+      positions: [-15., 0, 1, -5, 0, 1, -5, 5, 1, 5, 0, 2, 15, 0, 2, 15, 5, 2, -3, 0, 3, 1, 0, 3, -3, 5, 3],
+      normals: [for (i in 0...9) for (axis in [0., 0, 1]) axis],
+      uvs: [for (i in 0...18) i * 0.1],
+      indexes: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    };
+    var parts = TerrainModelBaker.surfaces(world, [group]);
+    equals(parts.get(0).triangleCount(), 2, "sol hücreye iki üçgen, biri sınırı aşsa da");
+    equals(parts.get(1).triangleCount(), 1, "sağ hücreye bir üçgen");
+    equals(parts.get(1).groups[0].positions.length, 9, "yalnızca kullanılan köşeler");
+    equals(parts.get(1).groups[0].indexes.join(","), "0,1,2", "yeniden numaralanır");
+    equals(parts.get(0).groups[0].texture, "world/textures/a.jpg", "doku taşınır");
+    var bytes = parts.get(0).write();
+    var again = TerrainModelBaker.surfaces(world, [group]).get(0).write();
+    equals(bytes.compare(again), 0, "aynı model aynı baytlar");
+    var read = TerrainSurface.read(bytes);
+    equals(read.triangleCount(), 2, "parça okunmalı");
+    equals(read.write().compare(bytes), 0, "parça dosyası kararlı");
+    check(Math.abs(read.groups[0].uvs[1] - 0.1) < 1e-6, "uv korunmalı");
+  }
+
+  static function testNavRules() {
+    // Çokgen alan kapalı, dışı açık
+    var world = new WorldData("world", 1, 1, 20, 2, []);
+    world.navResolution = 20;
+    var terrain = new WorldTerrain(world);
+    terrain.set(0, TerrainCell.flat(2));
+    var area = NavShapes.polygon([-5., -5, 5, -5, 0, 5]);
+    var baked = NavBaker.bake(0, world, terrain, [area]);
+    check(baked.isBlocked(10, 8), "üçgen alanın içi kapalı");
+    check(!baked.isBlocked(2, 18), "alanın dışı açık");
+    check(baked.isBlocked(10, 4), "kenarın hemen dışı da kapalı, karakter sınırı sıyırmasın");
+
+    // Eğim sınırı ayarlanabilir
+    var hill = TerrainCell.flat(2);
+    hill.setHeight(2, 0, 12);
+    hill.setHeight(2, 1, 12);
+    hill.setHeight(2, 2, 12);
+    terrain.set(0, hill);
+    world.maxSlope = 42;
+    check(NavBaker.bake(0, world, terrain, []).isBlocked(15, 10), "dik tepe kapalı");
+    world.maxSlope = 90;
+    check(!NavBaker.bake(0, world, terrain, []).isBlocked(15, 10), "eğim sınırı kalkınca tepeye çıkılır");
+  }
+
   static function testValidator() {
     var types = new ComponentRegistry();
     types.register(Pointer);
@@ -1636,6 +1776,9 @@ class TestMain {
     testBrushLockedEdges();
     testScatterBrush();
     testNav();
+    testTerrainModels();
+    testNavRules();
+    testSurfaces();
     testEnvironment();
     testPrefabFailures();
     testPrefabSchema();

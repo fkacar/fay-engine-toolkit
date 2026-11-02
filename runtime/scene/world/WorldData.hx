@@ -8,6 +8,23 @@ typedef TerrainLayer = {
   var color : Int;
 }
 
+// Blender veya 3ds Max'te hazırlanmış arazi. Hücrelere bölünür: her hücre kendi parçasını ve
+// yüksekliğini taşır, yeniden içe aktarınca yalnızca değişen hücreler yazılır.
+typedef TerrainModel = {
+  var source : String;        // FBX, proje köküne göre
+  var x : Float;              // dünyadaki merkez
+  var y : Float;
+  var base : Float;           // modelin en alçak noktasının yüksekliği
+  var width : Float;          // X yönündeki genişlik, metre
+  var rotation : Float;       // derece
+  var heightScale : Float;    // dikey çarpan, 1 oranı korur
+  var tiling : Float;         // doku tekrarı
+  var originX : Float;        // modelin kendi merkezi, alt noktası ve genişliği
+  var originY : Float;
+  var originZ : Float;
+  var originWidth : Float;
+}
+
 // Dünyanın ızgarası. Hücrelerin içeriği ayrı dosyalardadır: iki kişi farklı hücrelerde
 // çalışınca aynı dosyaya dokunmaz, oyun da yalnızca yakındaki hücreleri yükler.
 class WorldData {
@@ -17,6 +34,7 @@ class WorldData {
   public static inline var TERRAIN_SUFFIX = ".terrain.json";
   public static inline var SCATTER_SUFFIX = ".scatter.json";
   public static inline var NAV_SUFFIX = ".nav.json";
+  public static inline var SURFACE_SUFFIX = ".terrain.mesh";
   // Hücreye bağlı olmayan nesneler, oyuncunun ekibi gibi. Her zaman yüklüdür.
   public static inline var GLOBAL = -1;
   public static inline var OUTSIDE = -2;
@@ -31,6 +49,8 @@ class WorldData {
   public var resolution(default, null) : Int;    // hücre kenarındaki arazi karesi sayısı
   public var layers(default, null) : Array<TerrainLayer>;
   public var navResolution = 90;                 // hücre kenarındaki yol ağı düğümü sayısı
+  public var maxSlope = 42.;                     // yürünebilir en dik eğim, derece
+  public var terrainModels : Array<TerrainModel> = [];
   public var width(get, never) : Float;
   public var height(get, never) : Float;
   public var left(get, never) : Float;
@@ -56,6 +76,8 @@ class WorldData {
     var layers : Array<TerrainLayer> = raw.layers;
     var world = new WorldData(directory, raw.columns, raw.rows, raw.cellSize, raw.resolution, layers);
     if (raw.navResolution != null) world.navResolution = raw.navResolution;
+    if (raw.maxSlope != null) world.maxSlope = raw.maxSlope;
+    if (raw.terrainModels != null) world.terrainModels = raw.terrainModels;
     return world;
   }
 
@@ -65,8 +87,23 @@ class WorldData {
     out.add('\n  "cellSize": ${SceneFormat.number(cellSize)},\n  "resolution": $resolution,\n  "navResolution": $navResolution,\n  "layers": [');
     var lines = [for (layer in layers) '\n    {"id": "${layer.id}", "title": "${layer.title}", "color": ${layer.color}}'];
     out.add(lines.join(","));
-    out.add('\n  ]\n}\n');
+    out.add('\n  ],\n  "maxSlope": ${SceneFormat.number(maxSlope)},\n  "terrainModels": [');
+    var models = [for (model in terrainModels) '\n    {"source": "${model.source}", "x": ${n(model.x)}, "y": ${n(model.y)}, "base": ${n(model.base)}, '
+      + '"width": ${n(model.width)}, "rotation": ${n(model.rotation)}, "heightScale": ${n(model.heightScale)}, "tiling": ${n(model.tiling)}, '
+      + '"originX": ${n(model.originX)}, "originY": ${n(model.originY)}, "originZ": ${n(model.originZ)}, "originWidth": ${n(model.originWidth)}}'];
+    out.add(models.join(","));
+    out.add(models.length > 0 ? '\n  ]\n}\n' : ']\n}\n');
     return out.toString();
+  }
+
+  static function n(value : Float) {
+    return SceneFormat.number(value);
+  }
+
+  // Diskten yeniden okunan dünyanın düzenlenebilir ayarları.
+  public function assignSettings(other : WorldData) {
+    maxSlope = other.maxSlope;
+    terrainModels = other.terrainModels;
   }
 
   public function cellAt(x : Float, y : Float) : Int {

@@ -39,6 +39,7 @@ class WorldBrush {
 
   var state : WorldState;
   var isEditable : Int->Bool;
+  var canSculpt : Int->Bool;
   var changed : Array<Int>->Array<Int>->Void;
   var terrainBefore : Null<Map<Int, TerrainCell>>;
   var scatterBefore : Null<Map<Int, ScatterCell>>;
@@ -47,10 +48,13 @@ class WorldBrush {
   var lastY = 0.;
   var hasLast = false;
 
+  // isEditable: dağıtma için, canSculpt: yükseklik ve boya için. Arazi modelinin altındaki
+  // hücreye dağıtma yapılır ama şekli modelden gelir.
   // changed: bir fırça darbesinden sonra değişen arazi ve dağıtma hücreleri.
-  public function new(state : WorldState, isEditable : Int->Bool, changed : Array<Int>->Array<Int>->Void) {
+  public function new(state : WorldState, isEditable : Int->Bool, canSculpt : Int->Bool, changed : Array<Int>->Array<Int>->Void) {
     this.state = state;
     this.isEditable = isEditable;
+    this.canSculpt = canSculpt;
     this.changed = changed;
   }
 
@@ -142,7 +146,7 @@ class WorldBrush {
   }
 
   function canEditVertex(gx : Int, gy : Int) {
-    return Lambda.foreach(state.terrain.cellsOfVertex(gx, gy), isEditable);
+    return Lambda.foreach(state.terrain.cellsOfVertex(gx, gy), canSculpt);
   }
 
   function remember(gx : Int, gy : Int) {
@@ -162,7 +166,7 @@ class WorldBrush {
         var dx = px - x, dy = py - y;
         if (dx * dx + dy * dy >= radius * radius) continue;
         var cell = data.cellAt(px, py);
-        if (cell == WorldData.OUTSIDE || !isEditable(cell)) continue;
+        if (cell == WorldData.OUTSIDE || !canSculpt(cell)) continue;
         var terrain = state.terrain.get(cell);
         var ix = qx - data.columnOf(cell) * data.resolution, iy = qy - data.rowOf(cell) * data.resolution;
         if (terrain.layer(ix, iy) == layer) continue;

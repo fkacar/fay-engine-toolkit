@@ -4,7 +4,10 @@ import imgui.ImGui;
 import scene.editor.HeightmapImport;
 import scene.editor.WorldBrush;
 import scene.editor.WorldDocument;
+import scene.editor.TerrainModelSource;
 import scene.editor.commands.SetEnvironmentCommand;
+import scene.editor.commands.SetWorldValueCommand;
+import scene.world.WorldData.TerrainModel;
 import scene.world.EnvironmentData;
 import scene.world.WorldData;
 
@@ -25,6 +28,9 @@ class WorldPanel {
   var lowest = 0.;
   var highest = 80.;
   var environmentStart : Null<EnvironmentData>;
+  var slopeStart = 0.;
+  var source = "";
+  var placement = {x: 0., y: 0., base: 0., width: 0., rotation: 0., heightScale: 1., tiling: 1.};
 
   public function new(editor : Editor) {
     this.editor = editor;
@@ -44,14 +50,93 @@ class WorldPanel {
     if (ImGui.checkbox("Sınırları göster", bounds)) world.showBounds = bounds;
     ImGui.pushItemWidth(ImGui.getContentRegionAvail().x * FIELD_SHARE);
     if (ImGui.collapsingHeader("Arazi", ImGuiTreeNodeFlags.DefaultOpen)) drawTerrain(world);
+    if (ImGui.collapsingHeader("Arazi modeli")) drawTerrainModels(world);
     if (ImGui.collapsingHeader("Dağıtma", ImGuiTreeNodeFlags.DefaultOpen)) drawScatter(world);
     if (ImGui.collapsingHeader("Yol ağı")) drawNav(world);
     if (ImGui.collapsingHeader("Ortam")) drawEnvironment(world);
     ImGui.popItemWidth();
   }
 
+  function drawTerrainModels(world : WorldDocument) {
+    var data = world.data;
+    for (model in data.terrainModels.copy()) {
+      ImGui.pushID(model.source);
+      ImGui.textDisabled(haxe.io.Path.withoutDirectory(model.source));
+      ImGui.sameLine();
+      if (ImGui.smallButton("Düzenle")) edit(model);
+      ImGui.sameLine();
+      if (ImGui.smallButton("Kaldır")) show(world.setTerrainModels(data.terrainModels.filter(item -> item.source != model.source), "Arazi modelini kaldır"));
+      ImGui.popID();
+    }
+    var sources = TerrainModelSource.files();
+    if (sources.length == 0) {
+      ImGui.textWrapped('FBX dosyasını dokusuyla ${TerrainModelSource.DIRECTORY}/ altına koy.');
+      return;
+    }
+    if (source == "" || sources.indexOf(source) < 0) source = sources[0];
+    if (ImGui.beginCombo("Kaynak", haxe.io.Path.withoutDirectory(source))) {
+      for (name in sources) {
+        var chosen = name == source;
+        if (ImGui.selectable(name, chosen)) source = name;
+      }
+      ImGui.endCombo();
+    }
+    if (placement.width <= 0) placement.width = data.width;
+    number("Genişlik (m)", placement.width, value -> placement.width = Math.max(1, value));
+    number("Merkez X", placement.x, value -> placement.x = value);
+    number("Merkez Y", placement.y, value -> placement.y = value);
+    number("Taban yüksekliği", placement.base, value -> placement.base = value);
+    number("Dönüş", placement.rotation, value -> placement.rotation = value);
+    number("Yükseklik çarpanı", placement.heightScale, value -> placement.heightScale = Math.max(0.01, value));
+    number("Doku tekrarı", placement.tiling, value -> placement.tiling = Math.max(0.01, value));
+    if (ImGui.button("Uygula")) applyModel(world);
+    if (ImGui.isItemHovered()) ImGui.setTooltip("FBX içe aktarılır, model araziye yerleşir ve yüksekliği altındaki hücrelere yazılır.");
+  }
+
+  function applyModel(world : WorldDocument) {
+    var loaded = world.sourceBounds(source);
+    if (!loaded.ok) {
+      editor.show(loaded.message, true);
+      return;
+    }
+    var bounds = loaded.model;
+    var model : TerrainModel = {
+      source: source, x: placement.x, y: placement.y, base: placement.base, width: placement.width, rotation: placement.rotation,
+      heightScale: placement.heightScale, tiling: placement.tiling, originX: (bounds.minX + bounds.maxX) * 0.5,
+      originY: (bounds.minY + bounds.maxY) * 0.5, originZ: bounds.minZ, originWidth: Math.max(0.001, bounds.maxX - bounds.minX),
+    };
+    var models = world.data.terrainModels.filter(item -> item.source != source);
+    models.push(model);
+    show(world.setTerrainModels(models, "Arazi modeli"));
+  }
+
+  function edit(model : TerrainModel) {
+    placement = {x: model.x, y: model.y, base: model.base, width: model.width, rotation: model.rotation, heightScale: model.heightScale, tiling: model.tiling};
+    source = model.source;
+  }
+
+  function show(result : {ok : Bool, message : String}) {
+    editor.show(result.message, !result.ok);
+  }
+
+  function number(label : String, value : Float, write : Float->Void) {
+    var edited = value;
+    if (ImGui.inputDouble(label, edited, 0, 0, "%.2f")) write(edited);
+  }
+
   function drawNav(world : WorldDocument) {
     ImGui.textWrapped("Kayıtta değişen hücrelerin yol ağı kendiliğinden yenilenir.");
+    var slope = world.data.maxSlope;
+    if (ImGui.sliderDouble("Yürünebilir eğim", slope, 10, 90, "%.0f°")) world.data.maxSlope = slope;
+    if (ImGui.isItemActivated()) slopeStart = world.data.maxSlope;
+    if (ImGui.isItemDeactivatedAfterEdit() && slopeStart != world.data.maxSlope) {
+      var data = world.data;
+      editor.commands.execute(new SetWorldValueCommand("Yürünebilir eğim", value -> {
+        data.maxSlope = value;
+        world.manifestEdited();
+      }, slopeStart, data.maxSlope));
+    }
+    if (ImGui.isItemHovered()) ImGui.setTooltip("Bundan dik yamaçlara çıkılmaz. 90 her yeri yürünebilir yapar, istenmeyen tepeyi Yürünmez alan işaretçisiyle kapat.");
     if (ImGui.button("Yüklü hücreleri hesapla")) editor.show('Yol ağı güncellendi: ${world.bakeLoaded()} dosya');
     var shown = world.showNav;
     if (ImGui.checkbox("Yürünemeyen yerleri göster", shown)) world.showNav = shown;
@@ -201,6 +286,7 @@ class WorldPanel {
     }
     if (world.isDirty(WorldData.GLOBAL)) ImGui.textDisabled('Genel: $DIRTY_TIP');
     if (world.isEnvironmentDirty()) ImGui.textDisabled('Ortam: $DIRTY_TIP');
+    if (world.isManifestDirty()) ImGui.textDisabled('Dünya ayarları: $DIRTY_TIP');
   }
 
   function drawCell(world : WorldDocument, cell : Int, size : Float) {

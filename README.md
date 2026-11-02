@@ -108,6 +108,8 @@ res/world/c_3_2.scene.json     hücrenin nesneleri, sahneyle aynı biçim
 res/world/c_3_2.terrain.json   yükseklik ve boya
 res/world/c_3_2.scatter.json   dağıtılan nesneler
 res/world/c_3_2.nav.json       yol ağı
+res/world/c_3_2.terrain.mesh   arazi modelinin bu hücreye düşen parçası, ikili (LFS)
+res/world/textures/            arazi modellerinin dokuları
 ```
 
 Bağlamak için:
@@ -135,6 +137,8 @@ override public function keepsCell(isNear : (Float, Float) -> Bool) {
 ```
 
 `CellStreamer` hücreyi `objectRadius` halkasında yükler, bir hücre dışına çıkınca boşaltır. Arazi `terrainRadius` halkasında kalır. Oyun sürerken gelen hücrelerde `onStart` da çalışır.
+
+Arazi modeli `assets/terrain/` altındaki FBX'ten gelir. FBX `.editor/terrain/` altında HMD'ye çevrilir ve repoya girmez. Üçgenler ağırlık merkezine göre hücrelere bölünür, kesilmez. Yükseklik 2 metre aralıkla hücrenin `.terrain.json` dosyasına yazılır ve modelin dört köşesini kapladığı kareler `TerrainCell.COVERED` olur. Oyun bu karelerde kendi arazisini çizmez, parçayı `WorldView.terrainChanged` içinde `state.surfaces` üzerinden çizer. Yeniden uygulamada her hücre eskisiyle karşılaştırılır, yalnızca farklı olanlar komuta girer. `.gitattributes` içinde `*.mesh` LFS'te olmalıdır. Heaps FBX'i X ekseninde aynalar, model binalar gibi bu kurala uyar.
 
 Yol bulma `NavWorld.findPath` ile yapılır. Hücre başına düğüm ızgarasıdır, saf Haxe'dir, yerel kütüphane gerektirmez. Hücreler ilk gerektiğinde okunur, yol ağı olmayan hücre yürünebilir sayılır. Recast'e geçilirse `NavWorld` ve `NavBaker` değişir, bileşenler etkilenmez.
 

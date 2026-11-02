@@ -10,6 +10,10 @@ class NavShapes {
     return {x: frame.tx, y: frame.ty, halfX: sizeX * scaleX * 0.5, halfY: sizeY * scaleY * 0.5, angle: Math.atan2(frame._12, frame._11), isRound: false};
   }
 
+  public static function polygon(points : Array<Float>) : NavShape {
+    return {x: points[0], y: points[1], halfX: 0, halfY: 0, angle: 0, isRound: false, points: points};
+  }
+
   public static function circle(x : Float, y : Float, radius : Float) : NavShape {
     return {x: x, y: y, halfX: radius, halfY: radius, angle: 0, isRound: true};
   }

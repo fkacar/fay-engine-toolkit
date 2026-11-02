@@ -14,6 +14,8 @@ typedef ImportResult = {
 // `assets` ham kaynakları, `res` oyunun kullandıklarını tutar. FBX burada dönüştürülür ve
 // `res` altına HMD olarak yazılır: oyun derlemesi FBX'i makro içinde dönüştürür, normal
 // map'li modelde `meshTools` ister ve durur. HMD'de derleme zamanı dönüşümü yoktur.
+private typedef FbxTools = hxd.fmt.fbx.Data.FbxTools;
+
 class AssetImporter {
   static inline var SOURCE_DIRECTORY = "assets";
   static inline var TARGET_DIRECTORY = "res/models";
@@ -35,10 +37,11 @@ class AssetImporter {
     return '$TARGET_DIRECTORY/$name/$name.hmd';
   }
 
-  public function run(source : String) : ImportResult {
+  // target verilmezse model `res/models` altına yazılır.
+  public function run(source : String, ?target : String) : ImportResult {
     var hmd = try convert(source) catch (e : Dynamic) return {target: null, problems: ['$source dönüştürülemedi: $e']};
 
-    var target = targetOf(source);
+    if (target == null) target = targetOf(source);
     createDirectory(Path.directory(target));
     var problems = [];
     for (material in hmd.materials) {
@@ -92,9 +95,29 @@ class AssetImporter {
   }
 
   function convert(source : String) {
+    var root = hxd.fmt.fbx.Parser.parse(File.getBytes(source));
+    unpackTextures(root, source);
     var out = new hxd.fmt.fbx.HMDOut(source);
-    out.load(hxd.fmt.fbx.Parser.parse(File.getBytes(source)));
+    out.load(root);
     return out.toHMD(null, true);
+  }
+
+  // "Dokuları göm" ile dışa aktarılan dosyada dokular FBX'in içindedir. Yanına çıkarılır,
+  // böylece dokusu ayrı gelen dosyayla aynı yoldan alınır.
+  function unpackTextures(root : hxd.fmt.fbx.Data.FbxNode, source : String) {
+    for (video in FbxTools.getAll(root, "Objects.Video")) {
+      var content = FbxTools.getAll(video, "Content");
+      var names = FbxTools.getAll(video, "RelativeFilename").concat(FbxTools.getAll(video, "FileName"));
+      if (content.length == 0 || names.length == 0) continue;
+      var bytes = switch (content[0].props[0]) {
+        case hxd.fmt.fbx.Data.FbxProp.PBinary(data): data;
+        default: null;
+      };
+      if (bytes == null || bytes.length == 0) continue;
+      var name = Path.withoutDirectory(StringTools.replace(FbxTools.toString(names[0].props[0]), "\\", "/"));
+      var target = Path.directory(source) + "/" + name;
+      if (!FileSystem.exists(target)) File.saveBytes(target, bytes);
+    }
   }
 
   // Heaps olmayan dosyaları da önbelleğe alır, yeni dosya ancak böyle görünür.
@@ -103,8 +126,9 @@ class AssetImporter {
     if (local != null) local.clearCache();
   }
 
+  // Arazi modelleri Dünya panelinden alınır, model olarak içe aktarılmaz.
   function collect(directory : String, found : Array<String>) {
-    if (!FileSystem.exists(directory)) return;
+    if (!FileSystem.exists(directory) || directory == TerrainModelSource.DIRECTORY) return;
     for (name in FileSystem.readDirectory(directory)) {
       var path = '$directory/$name';
       if (FileSystem.isDirectory(path)) collect(path, found);

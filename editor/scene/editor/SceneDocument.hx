@@ -91,7 +91,7 @@ class SceneDocument {
   public function open(target : String) {
     var isWorld = WorldData.isWorldFile(target) && worlds != null;
     try {
-      if (isWorld) worlds.open(prefs.cellsIn(target));
+      if (isWorld) worlds.open(prefs.cellsIn(target), target);
       else scene.load(SceneFormat.read(File.getContent(target)));
     } catch (e : Dynamic) {
       editor.show('Açılamadı: $e', true);
@@ -126,7 +126,7 @@ class SceneDocument {
 
   public function recover() {
     try {
-      if (world != null) world.recover(AUTOSAVE_WORLD, prefs.cellsIn(path));
+      if (world != null) world.recover(AUTOSAVE_WORLD, prefs.cellsIn(path), path);
       else scene.load(SceneFormat.read(File.getContent(autosavePath())));
     } catch (e : Dynamic) {
       editor.show('Yedek açılamadı: $e', true);

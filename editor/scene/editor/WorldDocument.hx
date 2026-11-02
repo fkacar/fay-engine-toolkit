@@ -6,7 +6,14 @@ import scene.data.SceneFormat;
 import scene.nav.NavBaker;
 import scene.nav.NavShapes;
 import scene.nav.NavWorld;
+import scene.editor.TerrainModelSource.SourceModel;
+import scene.editor.commands.TerrainModelCommand;
+import scene.world.TerrainSurface.SurfaceGroup;
 import scene.world.ScatterCell;
+import scene.world.TerrainCell;
+import scene.world.TerrainModelBaker;
+import scene.world.TerrainModels;
+import scene.world.WorldData.TerrainModel;
 import scene.world.WorldData;
 import scene.world.WorldState;
 import sys.FileSystem;
@@ -33,9 +40,13 @@ class WorldDocument {
   var editor : Editor;
   var navView : NavWorld;
   var touchedEnvironment = false;
+  var touchedManifest = false;
+  var manifestPath = "";
   var scene : SceneInstance;
   var loaded = new Map<Int, Bool>();
   var disk = new Map<String, Null<String>>();
+  var diskBinary = new Map<String, Null<haxe.io.Bytes>>();
+  var recoveredDirectory : Null<String>;
   var dirty = new Map<Int, Bool>();
   var dirtyRevision = -1;
   var touchedTerrain = new Map<Int, Bool>();
@@ -47,12 +58,18 @@ class WorldDocument {
     this.scene = scene;
     this.state = state;
     state.read = readFile;
-    brush = new WorldBrush(state, isLoaded, strokeChanged);
+    state.readBytes = readBinary;
+    brush = new WorldBrush(state, isLoaded, canSculpt, strokeChanged);
     navView = new NavWorld(state);
   }
 
-  public function open(cells : Array<Int>) {
+  public function open(cells : Array<Int>, path : String) {
+    manifestPath = StringTools.startsWith(path, ROOT) ? path.substr(ROOT.length) : path;
+    var saved = readFile(manifestPath);
+    if (saved != null) data.assignSettings(WorldData.read(saved, data.directory));
+    touchedManifest = false;
     disk = new Map();
+    diskBinary = new Map();
     touchedTerrain = new Map();
     touchedScatter = new Map();
     for (cell in [for (key in loaded.keys()) key]) state.unloadScatter(cell);
@@ -123,6 +140,7 @@ class WorldDocument {
       dirtyRevision = editor.commands.revision;
       dirty = new Map();
       var changed = changedFiles();
+      for (path => bytes in changedBinaries()) changed.set(path, "");
       for (candidate in [WorldData.GLOBAL].concat(data.cells()))
         for (suffix in [WorldData.OBJECTS_SUFFIX, WorldData.TERRAIN_SUFFIX, WorldData.SCATTER_SUFFIX])
           if (changed.exists(data.path(candidate, suffix))) dirty.set(candidate, true);
@@ -137,17 +155,27 @@ class WorldDocument {
       if (cell != WorldData.GLOBAL && !isLoaded(cell)) loadCell(cell);
     }
     var files = changedFiles();
+    var binaries = changedBinaries();
+    for (path => bytes in binaries) {
+      if (bytes == null) FileSystem.deleteFile(ROOT + path);
+      else File.saveBytes(ROOT + path, bytes);
+      diskBinary.set(path, bytes);
+    }
     // Değişen hücrenin yol ağı kayıtla birlikte yenilenir, eski kalması unutulmaz.
-    var baked = [for (cell in loadedCells()) if (hasChanged(files, cell)) cell];
+    // Eğim veya arazi modeli değişince bütün yüklü hücrelerin yol ağı etkilenir.
+    var settings = files.exists(manifestPath);
+    var baked = [for (cell in loadedCells()) if (settings || hasChanged(files, cell)) cell];
     for (path => text in navFiles(baked)) if (diskText(path) != text) files.set(path, text);
     write(files);
     for (root in scene.entities) if (root.parent == null && root.cell != WorldData.GLOBAL) root.cell = cellOf(root);
     touchedTerrain = new Map();
     touchedScatter = new Map();
     touchedEnvironment = false;
+    touchedManifest = false;
     recovered = null;
+    recoveredDirectory = null;
     dirtyRevision = -1;
-    return Lambda.count(files);
+    return Lambda.count(files) + Lambda.count(binaries);
   }
 
   // Elle hesaplama: prefab değişince veya komşu hücrenin engeli eklenince gerekir.
@@ -170,13 +198,127 @@ class WorldDocument {
   public function autosave(directory : String) {
     if (!FileSystem.exists(directory)) FileSystem.createDirectory(directory);
     for (path => text in changedFiles()) File.saveContent(directory + "/" + haxe.io.Path.withoutDirectory(path), text);
+    for (path => bytes in changedBinaries()) if (bytes != null) File.saveBytes(directory + "/" + haxe.io.Path.withoutDirectory(path), bytes);
   }
 
-  public function recover(directory : String, cells : Array<Int>) {
+  public function recover(directory : String, cells : Array<Int>, path : String) {
     recovered = new Map();
-    for (name in FileSystem.readDirectory(directory)) recovered.set(name, File.getContent('$directory/$name'));
-    open(cells);
+    recoveredDirectory = directory;
+    for (name in FileSystem.readDirectory(directory))
+      if (!StringTools.endsWith(name, WorldData.SURFACE_SUFFIX)) recovered.set(name, File.getContent('$directory/$name'));
+    open(cells, path);
   }
+
+  // Model altındaki hücrenin şekli modelden gelir, fırça yalnızca dağıtma yapar.
+  public function canSculpt(cell : Int) {
+    if (!isLoaded(cell)) return false;
+    var terrain = state.terrain.get(cell);
+    return terrain != null && terrain.resolution == data.resolution && !terrain.hasCoverage();
+  }
+
+  public function manifestEdited() {
+    touchedManifest = true;
+    dirtyRevision = -1;
+  }
+
+  public function isManifestDirty() {
+    return touchedManifest && data.write() != diskText(manifestPath);
+  }
+
+  // Arazi modelleri hücre parçalarına bölünür ve yüksekliği yazılır. Her hücrenin yeni hali eskisiyle
+  // karşılaştırılır, yalnızca farklı olanlar değişir: Blender'da tek tepe değişince yalnızca altındaki
+  // hücreler değişir, başka birinin hücresine dokunulmaz. Değişecek hücreler yüklü olmalı.
+  public function setTerrainModels(models : Array<TerrainModel>, label : String) : {ok : Bool, message : String} {
+    var groups = [];
+    var problems = [];
+    for (model in models) {
+      var source = try TerrainModelSource.load(editor.importer, model.source, data.directory + "/textures", problems) catch (e : Dynamic) {
+        return {ok: false, message: '$e'};
+      }
+      groups = groups.concat(placeGroups(model, source));
+    }
+    for (problem in problems) editor.report(problem);
+
+    var surfaces = TerrainModelBaker.surfaces(data, groups);
+    var candidates = new Map<Int, Bool>();
+    for (cell in data.cells()) {
+      var terrain = state.terrain.get(cell);
+      if (state.surfaces.exists(cell) || terrain.hasCoverage() || terrain.resolution != data.resolution) candidates.set(cell, true);
+    }
+    for (cell in surfaces.keys()) candidates.set(cell, true);
+
+    // Kaplama silinir ama çözünürlük korunur: aynı model aynı sonucu verir.
+    var result = new Map<Int, TerrainCell>();
+    for (cell in candidates.keys()) {
+      var cleared = state.terrain.get(cell).clone();
+      for (i in 0...cleared.paint.length) if (cleared.paint[i] == TerrainCell.COVERED) cleared.paint[i] = 0;
+      result.set(cell, cleared);
+    }
+    for (group in groups) {
+      var baked = TerrainModelBaker.bake(data, cell -> result.exists(cell) ? result.get(cell) : state.terrain.get(cell), group.positions, group.indexes);
+      for (cell => terrain in baked) {
+        result.set(cell, terrain);
+        candidates.set(cell, true);
+      }
+    }
+
+    var before = new Map<Int, CellState>(), after = new Map<Int, CellState>();
+    for (cell in candidates.keys()) {
+      var terrain = result.get(cell);
+      if (!surfaces.exists(cell) && !terrain.hasCoverage() && terrain.resolution != data.resolution) terrain = terrain.resample(data.resolution);
+      var surface = surfaces.get(cell);
+      var oldSurface = state.surfaces.get(cell);
+      var sameSurface = surface == null ? oldSurface == null : oldSurface != null && surface.write().compare(oldSurface.write()) == 0;
+      if (sameSurface && terrain.write() == state.terrain.get(cell).write()) continue;
+      before.set(cell, {terrain: state.terrain.get(cell).clone(), surface: oldSurface});
+      after.set(cell, {terrain: terrain, surface: surface});
+    }
+    var missing = [for (cell in before.keys()) if (!isLoaded(cell)) data.title(cell)];
+    if (missing.length > 0) {
+      missing.sort(Reflect.compare);
+      return {ok: false, message: 'Değişecek hücreleri yükle: ${missing.join(", ")}'};
+    }
+    var sameModels = data.write() == withModels(models);
+    if (Lambda.count(before) == 0 && sameModels) return {ok: true, message: "Model değişmemiş, hiçbir hücre değişmedi"};
+    editor.commands.execute(new TerrainModelCommand(label, state, models, before, after, terrainModelsChanged));
+    return {ok: true, message: '${Lambda.count(before)} hücre güncellendi'};
+  }
+
+  function withModels(models : Array<TerrainModel>) {
+    var current = data.terrainModels;
+    data.terrainModels = models;
+    var text = data.write();
+    data.terrainModels = current;
+    return text;
+  }
+
+  function terrainModelsChanged(cells : Array<Int>) {
+    manifestEdited();
+    strokeChanged(cells, []);
+  }
+
+  function placeGroups(model : TerrainModel, source : SourceModel) : Array<SurfaceGroup> {
+    return [for (group in source.groups) {
+      var positions = [], normals = [], uvs = [];
+      for (i in 0...Std.int(group.positions.length / 3)) {
+        for (value in TerrainModels.place(model, group.positions[i * 3], group.positions[i * 3 + 1], group.positions[i * 3 + 2])) positions.push(value);
+        for (value in TerrainModels.normal(model, group.normals[i * 3], group.normals[i * 3 + 1], group.normals[i * 3 + 2])) normals.push(value);
+        uvs.push(group.uvs[i * 2] * model.tiling);
+        uvs.push(group.uvs[i * 2 + 1] * model.tiling);
+      }
+      ({texture: group.texture, positions: positions, normals: normals, uvs: uvs, indexes: group.indexes} : SurfaceGroup);
+    }];
+  }
+
+  public function sourceBounds(source : String) : {ok : Bool, message : String, model : Null<SourceModel>} {
+    var problems = [];
+    var model = try TerrainModelSource.load(editor.importer, source, data.directory + "/textures", problems) catch (e : Dynamic) {
+      return {ok: false, message: '$e', model: null};
+    }
+    for (problem in problems) editor.report(problem);
+    return {ok: true, message: "", model: model};
+  }
+
 
   // Fırçadan sonra zemine oturan nesneler yeni yüksekliğe geçer.
   function strokeChanged(terrain : Array<Int>, scatter : Array<Int>) {
@@ -288,12 +430,41 @@ class WorldDocument {
     var terrainCells = recovered == null ? [for (cell in touchedTerrain.keys()) cell] : data.cells();
     for (cell in terrainCells) compare(data.path(cell, WorldData.TERRAIN_SUFFIX), state.terrain.get(cell).write(), false);
     if (touchedEnvironment || recovered != null) compare(data.environmentPath(), state.environment.write(), false);
+    if (touchedManifest || recovered != null) compare(manifestPath, data.write(), false);
     var scatterCells = recovered == null ? [for (cell in touchedScatter.keys()) cell] : loadedCells();
     for (cell in scatterCells) {
       var items = state.scatter.get(cell);
       if (items != null) compare(data.path(cell, WorldData.SCATTER_SUFFIX), items.write(), items.items.length == 0);
     }
     return files;
+  }
+
+  // Arazi modelinin hücre parçaları: silinen parçanın değeri null'dur.
+  function changedBinaries() : Map<String, Null<haxe.io.Bytes>> {
+    var files = new Map<String, Null<haxe.io.Bytes>>();
+    var cells = recovered == null ? [for (cell in touchedTerrain.keys()) cell] : data.cells();
+    for (cell in cells) {
+      var path = data.path(cell, WorldData.SURFACE_SUFFIX);
+      var current = state.surfaces.get(cell), saved = binaryOnDisk(path);
+      if (current == null) {
+        if (saved != null) files.set(path, null);
+        continue;
+      }
+      var bytes = current.write();
+      if (saved == null || saved.compare(bytes) != 0) files.set(path, bytes);
+    }
+    return files;
+  }
+
+  function binaryOnDisk(path : String) : Null<haxe.io.Bytes> {
+    if (!diskBinary.exists(path)) diskBinary.set(path, FileSystem.exists(ROOT + path) ? File.getBytes(ROOT + path) : null);
+    return diskBinary.get(path);
+  }
+
+  function readBinary(path : String) : Null<haxe.io.Bytes> {
+    var mirror = recoveredDirectory == null ? null : recoveredDirectory + "/" + haxe.io.Path.withoutDirectory(path);
+    if (mirror != null && FileSystem.exists(mirror)) return File.getBytes(mirror);
+    return binaryOnDisk(path);
   }
 
   function diskText(path : String) : Null<String> {

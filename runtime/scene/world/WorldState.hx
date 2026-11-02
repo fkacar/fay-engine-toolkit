@@ -8,13 +8,16 @@ class WorldState {
   public var data(default, null) : WorldData;
   public var terrain(default, null) : WorldTerrain;
   public var scatter(default, null) = new Map<Int, ScatterCell>();
+  public var surfaces(default, null) = new Map<Int, TerrainSurface>();
   public var environment(default, null) : EnvironmentData;
   public var view : Null<WorldView>;
   public var read : String->Null<String>;
+  public var readBytes : String->Null<haxe.io.Bytes>;
 
-  public function new(data : WorldData, read : String->Null<String>) {
+  public function new(data : WorldData, read : String->Null<String>, ?readBytes : String->Null<haxe.io.Bytes>) {
     this.data = data;
     this.read = read;
+    this.readBytes = readBytes == null ? _ -> null : readBytes;
     terrain = new WorldTerrain(data);
     reloadEnvironment();
   }
@@ -28,6 +31,9 @@ class WorldState {
   public function loadTerrain(cell : Int) {
     var text = read(data.path(cell, WorldData.TERRAIN_SUFFIX));
     terrain.set(cell, text == null ? TerrainCell.flat(data.resolution) : TerrainCell.read(text));
+    var bytes = readBytes(data.path(cell, WorldData.SURFACE_SUFFIX));
+    if (bytes == null) surfaces.remove(cell);
+    else surfaces.set(cell, TerrainSurface.read(bytes));
     if (view != null) view.terrainChanged(cell);
   }
 
@@ -37,6 +43,7 @@ class WorldState {
 
   public function unloadTerrain(cell : Int) {
     terrain.remove(cell);
+    surfaces.remove(cell);
     if (view != null) view.terrainRemoved(cell);
   }
 

@@ -4,7 +4,7 @@ import imgui.ImGui;
 import scene.Component;
 import scene.Entity;
 import scene.FieldInfo;
-import scene.RouteMarker;
+import scene.PathMarker;
 import scene.editor.commands.SetGlobalCommand;
 import scene.world.WorldData;
 import scene.editor.commands.AddComponentCommand;
@@ -173,7 +173,7 @@ class InspectorPanel {
     }
     if (open) {
       for (field in component.describeFields()) drawField(peers, field);
-      var route = Std.downcast(component, RouteMarker);
+      var route = Std.downcast(component, PathMarker);
       if (route != null && ImGui.button("Nokta ekle")) editor.actions.addWaypoint(route);
     }
     ImGui.popID();

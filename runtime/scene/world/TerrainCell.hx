@@ -7,6 +7,9 @@ import scene.data.SceneFormat;
 class TerrainCell {
   public static inline var VERSION = 1;
 
+  // Bu kareyi arazi modeli çizer: oyun kendi üçgenini koymaz, fırçalar dokunmaz.
+  public static inline var COVERED = 35;
+
   static inline var PAINT_DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz";
   static inline var HEIGHT_PRECISION = 100.;
 
@@ -23,6 +26,30 @@ class TerrainCell {
   public static function flat(resolution : Int, height = 0.) {
     var corners = (resolution + 1) * (resolution + 1);
     return new TerrainCell(resolution, [for (i in 0...corners) height], [for (i in 0...resolution * resolution) 0]);
+  }
+
+  public function hasCoverage() {
+    return paint.indexOf(COVERED) >= 0;
+  }
+
+  // Aynı alanı başka sayıda kareyle örnekler: yükseklik doğrusal, boya en yakın kareden.
+  public function resample(target : Int) : TerrainCell {
+    if (target == resolution) return clone();
+    var result = TerrainCell.flat(target);
+    var ratio = resolution / target;
+    for (y in 0...target + 1)
+      for (x in 0...target + 1) {
+        var sx = x * ratio, sy = y * ratio;
+        var ix = Std.int(Math.min(sx, resolution - 1)), iy = Std.int(Math.min(sy, resolution - 1));
+        var fx = sx - ix, fy = sy - iy;
+        var bottom = height(ix, iy) * (1 - fx) + height(ix + 1, iy) * fx;
+        var top = height(ix, iy + 1) * (1 - fx) + height(ix + 1, iy + 1) * fx;
+        result.setHeight(x, y, bottom * (1 - fy) + top * fy);
+      }
+    for (y in 0...target)
+      for (x in 0...target)
+        result.setLayer(x, y, layer(Std.int((x + 0.5) * ratio), Std.int((y + 0.5) * ratio)));
+    return result;
   }
 
   public function clone() {

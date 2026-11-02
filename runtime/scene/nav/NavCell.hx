@@ -9,6 +9,7 @@ typedef NavShape = {
   var halfY : Float;
   var angle : Float;   // radyan
   var isRound : Bool;
+  @:optional var points : Array<Float>;  // çokgen: x, y sırasıyla
 }
 
 // Bir hücrenin yol ızgarası. Satırlar sıra sıra uzunluklardır (yürünür, kapalı, yürünür...):

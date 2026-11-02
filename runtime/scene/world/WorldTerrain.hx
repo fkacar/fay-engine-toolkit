@@ -38,10 +38,11 @@ class WorldTerrain implements GroundHeight {
     return cells;
   }
 
+  // Ortak köşeler dünya çözünürlüğündeki hücrelerde tutulur; model altındaki hücre ayrı örneklenir.
   public function vertexHeight(gx : Int, gy : Int) : Float {
     for (cell in cellsOfVertex(gx, gy)) {
       var data = cells.get(cell);
-      if (data == null) continue;
+      if (data == null || data.resolution != world.resolution) continue;
       return data.height(gx - world.columnOf(cell) * world.resolution, gy - world.rowOf(cell) * world.resolution);
     }
     return 0;
@@ -50,7 +51,7 @@ class WorldTerrain implements GroundHeight {
   public function setVertexHeight(gx : Int, gy : Int, value : Float) {
     for (cell in cellsOfVertex(gx, gy)) {
       var data = cells.get(cell);
-      if (data != null) data.setHeight(gx - world.columnOf(cell) * world.resolution, gy - world.rowOf(cell) * world.resolution, value);
+      if (data != null && data.resolution == world.resolution) data.setHeight(gx - world.columnOf(cell) * world.resolution, gy - world.rowOf(cell) * world.resolution, value);
     }
   }
 
@@ -62,16 +63,20 @@ class WorldTerrain implements GroundHeight {
     return found;
   }
 
-  // Üçgenlerin gerçek yüzeyini izler, böylece nesneler karelerin içine gömülmez.
+  // Üçgenlerin gerçek yüzeyini izler, böylece nesneler karelerin içine gömülmez. Arazi modeli
+  // altındaki hücre daha sık örneklenir, bu yüzden çözünürlük hücreden okunur.
   public function heightAt(x : Float, y : Float) {
-    var resolution = world.resolution;
-    var gx = Math.max(0, Math.min((x - world.left) / world.step, world.columns * resolution - 0.001));
-    var gy = Math.max(0, Math.min((y - world.bottom) / world.step, world.rows * resolution - 0.001));
-    var qx = Std.int(gx), qy = Std.int(gy);
-    var data = cells.get(world.id(Std.int(qx / resolution), Std.int(qy / resolution)));
+    var size = world.cellSize;
+    var cx = Math.max(0, Math.min(x - world.left, world.width - 0.001));
+    var cy = Math.max(0, Math.min(y - world.bottom, world.height - 0.001));
+    var column = Std.int(cx / size), row = Std.int(cy / size);
+    var data = cells.get(world.id(column, row));
     if (data == null) return 0.;
-    var ix = qx % resolution, iy = qy % resolution;
-    var fx = gx - qx, fy = gy - qy;
+    var resolution = data.resolution;
+    var gx = Math.min((cx - column * size) / size * resolution, resolution - 0.0001);
+    var gy = Math.min((cy - row * size) / size * resolution, resolution - 0.0001);
+    var ix = Std.int(gx), iy = Std.int(gy);
+    var fx = gx - ix, fy = gy - iy;
     var h00 = data.height(ix, iy), h11 = data.height(ix + 1, iy + 1);
     if (fx > fy) {
       var h10 = data.height(ix + 1, iy);

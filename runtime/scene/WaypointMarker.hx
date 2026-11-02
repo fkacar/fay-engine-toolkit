@@ -12,7 +12,7 @@ class WaypointMarker extends Marker {
 
   // Filtre rotayla birlikte çalışır.
   override public function isFiltered() {
-    var route = entity.parent == null ? null : Lambda.find(entity.parent.components, c -> Std.isOfType(c, RouteMarker));
+    var route = entity.parent == null ? null : Lambda.find(entity.parent.components, c -> Std.isOfType(c, PathMarker));
     return route == null ? super.isFiltered() : Marker.hiddenTypes.exists(route.componentId());
   }
 

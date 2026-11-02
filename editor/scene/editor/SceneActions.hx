@@ -10,7 +10,7 @@ import scene.Entity;
 import scene.GroundHeight;
 import scene.Guid;
 import scene.Marker;
-import scene.RouteMarker;
+import scene.PathMarker;
 import scene.data.Prefabs;
 import scene.data.SceneData;
 import scene.data.SceneFormat;
@@ -251,15 +251,13 @@ class SceneActions {
     item.position = [place.x, place.y, editor.scene.service(GroundHeight) == null ? place.z : 0];
     item.components.push(new ComponentData(type));
     var items = [item];
-    if (Std.isOfType(editor.scene.registry.create(type), RouteMarker)) {
-      items.push(waypointData(item.id, 0, 0));
-      items.push(waypointData(item.id, WAYPOINT_GAP, 0));
-    }
+    var path = Std.downcast(editor.scene.registry.create(type), PathMarker);
+    if (path != null) for (point in path.initialPoints()) items.push(waypointData(item.id, point[0], point[1]));
     add(items, "İşaretçi ekle");
   }
 
   // Yeni nokta son noktanın ilerisine, rota yönünde gelir.
-  public function addWaypoint(route : RouteMarker) {
+  public function addWaypoint(route : PathMarker) {
     var points = route.waypoints();
     var x = 0., y = 0.;
     if (points.length > 0) {
@@ -283,7 +281,7 @@ class SceneActions {
     var item = new EntityData(Guid.make(), "Nokta");
     item.parent = parent;
     item.position = [x, y, 0];
-    item.components.push(new ComponentData(RouteMarker.WAYPOINT));
+    item.components.push(new ComponentData(PathMarker.WAYPOINT));
     return item;
   }
 
