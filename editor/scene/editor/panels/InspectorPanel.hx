@@ -40,6 +40,10 @@ class InspectorPanel {
   }
 
   public function draw() {
+    if (editor.dialogWorkspace.isOpen) {
+      editor.dialogWorkspace.drawProperties();
+      return;
+    }
     var entities = editor.selection.items;
     if (entities.length == 0) {
       ImGui.textDisabled("Bir nesne seç");
@@ -175,8 +179,27 @@ class InspectorPanel {
       for (field in component.describeFields()) drawField(peers, field);
       var route = Std.downcast(component, PathMarker);
       if (route != null && ImGui.button("Nokta ekle")) editor.actions.addWaypoint(route);
+      if (component.entity.instanceRoot == null) drawAddable(peers, component.addable());
     }
     ImGui.popID();
+  }
+
+  // Tetikleyicinin altında "+ Koşul" ve "+ Eylem": Bileşen ekle listesinde aramak gerekmez.
+  function drawAddable(peers : Array<Component>, groups : Array<String>) {
+    for (k in 0...groups.length) {
+      var group = groups[k];
+      if (k > 0) ImGui.sameLine();
+      if (ImGui.button('+ $group')) ImGui.openPopup('ekle-$group');
+      if (!ImGui.beginPopup('ekle-$group')) continue;
+      var registry = editor.scene.registry;
+      for (type in registry.currentTypes()) {
+        var sample = registry.create(type);
+        if (sample.category() != group || !ImGui.selectable(sample.title() + "##" + type)) continue;
+        var commands : Array<Command> = [for (peer in peers) new AddComponentCommand(peer.entity, registry.create(type))];
+        editor.commands.execute(new GroupCommand('$group ekle', commands));
+      }
+      ImGui.endPopup();
+    }
   }
 
   // Bileşenler gruplanır: tetikleyiciye koşul ve eylem eklemek de buradan yapılır.
@@ -231,6 +254,7 @@ class InspectorPanel {
           case HDialog:
             var dialogs = editor.dialogs;
             drawOptions(peers, field, label, before, dialogs.ids(), true, id -> dialogs.exists(id) ? '$id (${dialogs.dialogs.get(id).title})' : id);
+            if (dialogs.exists(before) && ImGui.smallButton("Diyaloğu düzenle##" + field.name)) editor.dialogWorkspace.open(before);
           case HRef(table):
             var data = editor.data.tables.get(table);
             drawOptions(peers, field, label, before, data == null ? [] : data.ids(), true, id -> data == null ? id : data.label(id));

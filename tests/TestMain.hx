@@ -1762,6 +1762,34 @@ class TestMain {
     return dialog;
   }
 
+  // Yerleşim veriden hesaplanır: konumlar ekran netliğine ve önceki konumlara bağlı değildir.
+  static function testDialogLayout() {
+    var dialog = questDialog();
+    var first = scene.story.DialogLayout.arrange(dialog);
+    for (node in dialog.nodes) {
+      node.x = node.id * 37;
+      node.y = -node.id * 11;
+    }
+    var again = scene.story.DialogLayout.arrange(dialog);
+    var same = true;
+    for (id => at in first) if (again.get(id).x != at.x || again.get(id).y != at.y) same = false;
+    check(same, "yerleşim eski konumlardan etkilenmemeli");
+    var start = first.get(dialog.start().id);
+    check(start.x == 0 && start.y == 0, "başlangıç sol üstte");
+    for (id => at in first) {
+      var column = at.x / scene.story.DialogLayout.COLUMN_STEP;
+      check(column == Math.ffloor(column), 'sütun adımı sabit olmalı: ${at.x}');
+      for (other => there in first) {
+        if (other == id || there.x != at.x || there.y <= at.y) continue;
+        check(there.y >= at.y + scene.story.DialogLayout.height(dialog.node(id)), 'aynı sütunda üst üste binmemeli: $id $other');
+      }
+    }
+    equals(scene.story.DialogLayout.wrappedLines("abc def", 3), 2, "boşluktan kaydırma");
+    equals(scene.story.DialogLayout.wrappedLines("abcdefg", 3), 3, "uzun kelime bölünür");
+    equals(scene.story.DialogLayout.wrappedLines("a\nb", 10), 2, "Enter yeni satır");
+    equals(scene.story.DialogLayout.wrappedLines("kısa", 26), 1, "sığan metin tek satır");
+  }
+
   static function testStory() {
     var dialog = questDialog();
     var text = dialog.write();
@@ -1940,6 +1968,7 @@ class TestMain {
     testSurfaces();
     testDataTables();
     testStory();
+    testDialogLayout();
     testEnvironment();
     testPrefabFailures();
     testPrefabSchema();

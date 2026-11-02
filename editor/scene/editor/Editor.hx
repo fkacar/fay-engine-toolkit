@@ -73,6 +73,9 @@ class Editor {
   public var commandName(default, null) = Sys.systemName() == "Mac" ? "Cmd" : "Ctrl";
   public var centerX(default, null) = 0.;
   public var centerY(default, null) = 0.;
+  public var dialogWorkspace(default, null) : DialogWorkspace;
+  var centerWidth = 0.;
+  var centerHeight = 0.;
   // Asset Browser'dan sürüklenen dosya, `res` köküne göre.
   public var assetDrag : Null<String>;
 
@@ -130,6 +133,7 @@ class Editor {
     assets = new AssetBrowser(this);
     worldPanel = new WorldPanel(this);
     dataPanel = new DataPanel(this);
+    dialogWorkspace = new DialogWorkspace(this);
     dialogPanel = new DialogPanel(this);
     if (WorldData.isWorldFile(path)) document.open(path);
     document.validate();
@@ -163,6 +167,7 @@ class Editor {
       if (ImGui.begin(panel.title)) panel.draw();
       ImGui.end();
     }
+    dialogWorkspace.draw();
     if (showAssets) {
       ImGui.setWindowFocus(ASSETS);
       ImGui.setWindowFocus(INSPECTOR);
@@ -274,10 +279,15 @@ class Editor {
       if (io.WantTextInput) return;
       if (Key.isPressed(Key.Z)) Key.isDown(Key.SHIFT) ? redo() : undo();
       if (Key.isPressed(Key.Y)) redo();
-      if (isPanelFocused()) return;
+      if (isPanelFocused() || dialogWorkspace.isOpen) return;
       if (Key.isPressed(Key.C)) actions.copy();
       if (Key.isPressed(Key.V)) actions.paste();
       if (Key.isPressed(Key.D)) actions.duplicate();
+      return;
+    }
+    // Diyalog düzenleyici açıkken sahne kısayolları çalışmaz: Delete sahnedeki seçili nesneyi silmesin.
+    if (dialogWorkspace.isOpen) {
+      dialogWorkspace.readKeys();
       return;
     }
     if (io.WantCaptureKeyboard) return;
@@ -308,7 +318,7 @@ class Editor {
           case Dialog.LINE if (node.text == null || node.text == ""): "satır boş";
           default: null;
         };
-        if (problem != null) issues.push({entity: null, message: 'Diyalog ${dialog.title}: $problem'});
+        if (problem != null) issues.push({entity: null, message: 'Diyalog ${dialog.title}: $problem', dialog: id, node: node.id});
       }
     }
     return issues;
@@ -317,6 +327,15 @@ class Editor {
   // Önceki karenin değeridir; paneller çizilmeden önce sıfırlanır, gizli panel kilitlemez.
   function isPanelFocused() {
     return keyboardPanelFocused;
+  }
+
+  // Ortadaki sahne alanı: diyalog düzenleyici burayı kaplar.
+  public function centerArea() {
+    return {x: centerX, y: centerY, width: centerWidth, height: centerHeight};
+  }
+
+  public function showInspector() {
+    ImGui.setWindowFocus(INSPECTOR);
   }
 
   public function claimKeyboard() {
@@ -530,6 +549,8 @@ class Editor {
     if (center != null) {
       centerX = center.Pos.x;
       centerY = center.Pos.y;
+      centerWidth = center.Size.x;
+      centerHeight = center.Size.y;
     }
     ImGui.end();
   }
@@ -556,7 +577,9 @@ class Editor {
     if (document.warningCount() == 0 && messages.length == 0) ImGui.textDisabled("Uyarı yok");
     for (i in 0...document.issues.length) {
       var issue = document.issues[i];
-      if (!ImGui.selectable(issue.message + "##" + i) || issue.entity == null || !scene.contains(issue.entity)) continue;
+      if (!ImGui.selectable(issue.message + "##" + i)) continue;
+      if (issue.dialog != null) dialogWorkspace.open(issue.dialog, issue.node == null ? 0 : issue.node);
+      if (issue.entity == null || !scene.contains(issue.entity)) continue;
       selection.set([issue.entity]);
       hierarchy.reveal(issue.entity);
     }

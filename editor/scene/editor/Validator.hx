@@ -6,6 +6,8 @@ import scene.SceneInstance;
 typedef Issue = {
   var entity : Null<Entity>;  // diyalog gibi sahne dışı sorunlarda yok
   var message : String;
+  @:optional var dialog : String;
+  @:optional var node : Int;
 }
 
 // Kaydederken çalışır, kaydı engellemez: tasarımcı yarım işini de kaydedebilmeli.

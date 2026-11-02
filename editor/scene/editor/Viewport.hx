@@ -64,6 +64,8 @@ class Viewport {
   }
 
   public function update(dt : Float) {
+    // Diyalog düzenleyici bu alanı kaplar: tıklama ve tuşlar sahneye gitmez.
+    if (editor.dialogWorkspace.isOpen) return;
     var density = editor.interfaceScale;
     var mouse = ImGui.getMousePos();
     var ray = view.rayFromScreen(mouse.x, mouse.y);

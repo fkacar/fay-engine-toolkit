@@ -244,12 +244,13 @@ class SceneActions {
     return markers.filter(marker -> marker != null && marker.isPlaceable());
   }
 
-  public function addMarker(type : String) {
+  public function addMarker(type : String, ?extra : Array<ComponentData>, ?name : String) {
     var place = groundUnder(editor.viewport.centerRay());
-    var item = new EntityData(Guid.make(), cast(editor.scene.registry.create(type), Marker).title());
+    var item = new EntityData(Guid.make(), name != null ? name : cast(editor.scene.registry.create(type), Marker).title());
     // Zemini bilen işaretçide z, zeminden yüksekliktir.
     item.position = [place.x, place.y, editor.scene.service(GroundHeight) == null ? place.z : 0];
     item.components.push(new ComponentData(type));
+    if (extra != null) for (data in extra) item.components.push(data);
     var items = [item];
     var path = Std.downcast(editor.scene.registry.create(type), PathMarker);
     if (path != null) for (point in path.initialPoints()) items.push(waypointData(item.id, point[0], point[1]));

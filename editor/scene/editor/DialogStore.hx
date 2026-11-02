@@ -9,6 +9,8 @@ class DialogStore {
   public static inline var DIRECTORY = "res/" + Dialog.DIRECTORY;
 
   public var dialogs(default, null) = new Map<String, Dialog>();
+  // Koşul düğümündeki eşya bu tablodan seçilir; satır silinirken diyaloglar da taranır. Oyun belirler.
+  public var itemTable : Null<String>;
 
   var disk = new Map<String, String>();
 

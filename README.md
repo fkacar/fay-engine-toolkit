@@ -68,7 +68,7 @@ Tablo ve diyalog alanları:
 
 Tabloda olmayan satır veya olmayan diyalog derleme uyarısı verir ama derlemeyi durdurmaz, editörde Uyarılar panelinde görünür. Bunlar kod değil içeriktir: bir tasarımcının silmesi veya iki kişinin birleştirmesi ekibin editörünü açılmaz hale getirmemelidir. Veri paneli kullanılan satırın silinmesini ve kimliğinin değişmesini engeller (`scene.editor.DataUsage`). Kod tarafındaki uyuşmazlıklar, yani bileşen, alan ve `@:choice` seçenekleri, derlemeyi durdurmaya devam eder.
 
-Bileşen `title()` ile Türkçe adını, `category()` ile "Bileşen ekle" grubunu, `issues()` ile Uyarılar paneline düşecek kendi kurallarını verir.
+Bileşen `title()` ile Türkçe adını, `category()` ile "Bileşen ekle" grubunu, `issues()` ile Uyarılar paneline düşecek kendi kurallarını verir. `addable()` grup adları döndürürse Inspector bileşenin altında "+ Grup" düğmeleri gösterir; tetikleyici `[TriggerCondition.CATEGORY, TriggerAction.CATEGORY]` döndürür.
 
 `@:choice` alanı `String` olmalı ve varsayılanı seçeneklerden biri olmalıdır. Seçenek koddan çıkarılınca o değeri kullanan sahne, prefab veya prefab farkı derlemeyi durdurur.
 
@@ -160,6 +160,10 @@ Yol bulma `NavWorld.findPath` ile yapılır. Hücre başına düğüm ızgarası
 - Koşul `TriggerCondition`'dan, eylem `TriggerAction`'dan türeyen bileşendir. Tetikleyici nesnesine eklenir, `story.fire(entity)` bütün koşullar sağlanırsa eylemleri bileşen sırasıyla çalıştırır.
 - Diyalog `Dialog` biçimindedir, `DialogRunner` oynatır. Olay düğümü `story.emit(ad)` çağırır, `story.listen(ad, entity)` ile bekleyen tetikleyici çalışır. Eşya ve değişken işleri böylece tek yerde, eylemlerde kalır.
 - Diyalog kutusunun çizimi oyuna aittir: `story.dialog` okunur, `next()` ve `choose(i)` çağrılır.
+- Editörde diyalog `scene.editor.DialogWorkspace` ile sahne görünümünün yerinde düzenlenir, seçili düğüm Inspector'da açılır. Alt paneldeki `DialogPanel` yalnızca listedir.
+- Düğüm konumları dosyada ekran netliğinden bağımsız birimdedir, tuvale `interfaceScale` ile çarpılarak verilir. Yerleştir `scene.story.DialogLayout` ile ekranda ölçülen boydan değil içerikten hesaplanır: Retina Mac ile Windows aynı dosyayı üretir.
+- "Tetikleyici ekle" kayıtlı bileşenlerden bulunur: `addable()` içinde eylem grubu olan yerleştirilebilir işaretçi ve `@:dialog` alanlı bir `TriggerAction`. İkisi yoksa düğme görünmez.
+- Oyun `editor.dialogs.itemTable` ile eşya tablosunu söylerse koşul düğümünde eşya listeden seçilir ve satır silinirken diyaloglar da taranır.
 
 Oyun verisi `scene.data.DataTable` ve `GameData` ile okunur. Her tablo `res/data/<ad>.table.json` dosyasıdır.
 

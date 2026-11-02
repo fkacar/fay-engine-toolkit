@@ -65,6 +65,11 @@ class Component {
   }
 
   // Uyarılar panelinde görünecek sorunlar: eklentinin kendi kuralları buraya yazılır.
+  // Inspector bu gruplar için bileşenin altında "+ Grup" düğmesi gösterir: tetikleyiciye koşul ve eylem gibi.
+  public function addable() : Array<String> {
+    return [];
+  }
+
   public function issues() : Array<String> {
     return [];
   }
