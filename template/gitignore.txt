@@ -6,3 +6,4 @@ res/.tmp/
 Thumbs.db
 imgui.ini
 .editor/
+NodeEditor.json

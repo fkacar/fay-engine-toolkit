@@ -4,24 +4,34 @@ package scene.data;
 class SceneSchema {
   var components = new Map<String, Map<String, String>>();
   var choices = new Map<String, Map<String, Array<String>>>();
+  var references = new Map<String, Map<String, String>>();
+  var refExists : Null<(String, String) -> Bool>;
+  // Tablo satırı, diyalog ve prefab dosyası içeriktir: tasarımcı derleme yapmadan değiştirir, iki kişinin
+  // birleştirmesi de kırabilir. Derlemeyi durdurursa ekip editörü açıp düzeltemez, bu yüzden uyarıdır.
+  public var warnings(default, null) : Array<String> = [];
 
   public function new() {}
 
   // ids: kimlik ve eski kimlikler. fields: alan adı (eskileri dahil) ve tipi.
   // options: `@:choice` alanlarının geçerli değerleri.
-  public function add(ids : Array<String>, fields : Map<String, String>, ?options : Map<String, Array<String>>) {
+  // refs: `@:ref` alanlarının tabloları.
+  public function add(ids : Array<String>, fields : Map<String, String>, ?options : Map<String, Array<String>>, ?refs : Map<String, String>) {
     for (id in ids) {
       components.set(id, fields);
       if (options != null) choices.set(id, options);
+      if (refs != null) references.set(id, refs);
     }
   }
 
-  public function check(text : String, ?prefabExists : String->Bool) : Array<String> {
+  // refExists: tablo ve kimlik verilir, satır varsa true.
+  public function check(text : String, ?prefabExists : String->Bool, ?refExists : (String, String) -> Bool) : Array<String> {
+    this.refExists = refExists;
+    warnings = [];
     var data = try SceneFormat.read(text) catch (e : Dynamic) return ['Dosya okunamadı: $e'];
     var problems = [];
     for (entity in data.entities) {
       if (entity.prefab != null && prefabExists != null && !prefabExists(entity.prefab))
-        problems.push('${entity.name}: "${entity.prefab}" prefab dosyası yok.');
+        warnings.push('${entity.name}: "${entity.prefab}" prefab dosyası yok. Oyunda bu nesne boş kalır, editörde Uyarılar panelinden düzelt.');
       for (change in entity.overrides) {
         var parts = Prefabs.componentField(change.field);
         if (parts == null) continue;
@@ -54,6 +64,10 @@ class SceneSchema {
     var allowed = choices.exists(type) ? choices.get(type).get(name) : null;
     if (allowed != null && allowed.indexOf(value) < 0)
       problems.push('$entity: "$type.$name" değeri "$value" seçeneklerde yok (${allowed.join(", ")}). Seçeneği koda geri ekle veya dosyadaki değeri değiştir.');
+    var table = references.exists(type) ? references.get(type).get(name) : null;
+    if (table != null && refExists != null && value != "" && !refExists(table, value))
+      warnings.push(table.charAt(0) == "@" ? '$entity: "$type.$name" değeri "$value" bulunamadı. Editörde Uyarılar panelinden düzelt.'
+        : '$entity: "$type.$name" değeri "$value" $table tablosunda yok. Editörde Uyarılar panelinden düzelt.');
   }
 
   static function matches(kind : String, value : Dynamic) {

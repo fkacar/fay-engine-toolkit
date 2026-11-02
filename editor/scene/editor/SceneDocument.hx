@@ -45,6 +45,15 @@ class SceneDocument {
     hasRecovery = isRecoverable();
   }
 
+  // Bellekte açık olan dosya: dünyada genel dosya ve yüklü hücreler, tek sahnede kendisi.
+  public function isOpenFile(file : String) {
+    if (world == null) return file == path;
+    var data = world.data;
+    if (file == "res/" + data.path(WorldData.GLOBAL, WorldData.OBJECTS_SUFFIX)) return true;
+    for (cell in world.loadedCells()) if (file == "res/" + data.path(cell, WorldData.OBJECTS_SUFFIX)) return true;
+    return false;
+  }
+
   public function canOpenWorld() {
     return worlds != null;
   }
@@ -58,6 +67,7 @@ class SceneDocument {
     try {
       if (world != null) written = world.save();
       else File.saveContent(path, SceneFormat.write(scene.toData()));
+      written += editor.data.save() + editor.dialogs.save();
     } catch (e : Dynamic) {
       editor.show('Kaydedilemedi: $e', true);
       return false;
@@ -211,6 +221,9 @@ class SceneDocument {
   function loaded(message : String) {
     editor.selection.clear();
     editor.commands.clear();
+    // Kaydedilmeden bırakılan tablo değişiklikleri de atılır, geçmişle birlikte.
+    editor.data.reload();
+    editor.dialogs.reload();
     lastSaved = "";
     issues = [];
     autosaveTimer = 0;

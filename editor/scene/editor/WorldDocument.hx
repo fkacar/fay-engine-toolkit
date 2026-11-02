@@ -367,7 +367,12 @@ class WorldDocument {
     for (path => text in files) {
       File.saveContent(ROOT + path, text);
       disk.set(path, text);
-      if (StringTools.endsWith(path, WorldData.NAV_SUFFIX)) for (cell in data.cells()) if (data.path(cell, WorldData.NAV_SUFFIX) == path) navView.forget(cell);
+      if (StringTools.endsWith(path, WorldData.NAV_SUFFIX))
+        for (cell in data.cells()) if (data.path(cell, WorldData.NAV_SUFFIX) == path) {
+          navView.forget(cell);
+          var shared = scene.service(NavWorld);
+          if (shared != null) shared.forget(cell);
+        }
     }
   }
 

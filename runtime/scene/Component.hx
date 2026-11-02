@@ -54,6 +54,21 @@ class Component {
     return [];
   }
 
+  // Inspector'da ve "Bileşen ekle" menüsünde görünen ad.
+  public function title() : String {
+    return componentId();
+  }
+
+  // "Bileşen ekle" menüsündeki grup.
+  public function category() : String {
+    return "Bileşen";
+  }
+
+  // Uyarılar panelinde görünecek sorunlar: eklentinin kendi kuralları buraya yazılır.
+  public function issues() : Array<String> {
+    return [];
+  }
+
   // Hücre boşaltılmadan önce sorulur. Hücreden çıkıp oyuncunun yanına gelen şeyler, örneğin
   // takip edilen kervan, hücreyle birlikte silinmesin diye true döner.
   public function keepsCell(isNear : (Float, Float) -> Bool) : Bool {

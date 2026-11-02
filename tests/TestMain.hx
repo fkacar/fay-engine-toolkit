@@ -7,6 +7,13 @@ import scene.Guid;
 import scene.PlayOptions;
 import scene.SceneInstance;
 import scene.Entity;
+import scene.data.DataTable;
+import scene.story.Dialog;
+import scene.story.GameState;
+import scene.story.Story;
+import scene.story.TriggerAction;
+import scene.story.TriggerCondition;
+import scene.data.GameData;
 import scene.data.Prefabs;
 import scene.nav.NavBaker;
 import scene.nav.NavCell;
@@ -135,6 +142,20 @@ class NavShapes {
 
   public static function polygon(points : Array<Float>) : NavShape {
     return {x: points[0], y: points[1], halfX: 0, halfY: 0, angle: 0, isRound: false, points: points};
+  }
+}
+
+@:component("give_count")
+class GiveCount extends TriggerAction {
+  override public function run(story : Story) {
+    story.state.give("ekmek", 2);
+  }
+}
+
+@:component("need_flag")
+class NeedFlag extends TriggerCondition {
+  override public function passes(story : Story) : Bool {
+    return story.state.flag("izin") >= 1;
   }
 }
 
@@ -953,9 +974,13 @@ class TestMain {
     equals(scene.entities.length, 1, "kök kalmalı");
     equals(SceneFormat.write(scene.toData()), text, "yol ve farklar kaybolmamalı");
 
+    // Oyun da çökmez: derleme eksik prefab'da durmaz, nesne boş kurulur ve uyarı yazılır.
+    var game = prefabScene(files, Game);
     var failed = false;
-    try prefabScene(files, Game).load(SceneFormat.read(text)) catch (e : Dynamic) failed = true;
-    check(failed, "oyunda eksik prefab gizlenmemeli");
+    try game.load(SceneFormat.read(text)) catch (e : Dynamic) failed = true;
+    check(!failed, "oyun eksik prefab yüzünden çökmemeli");
+    equals(game.warnings.length, 1, "oyunda eksik prefab uyarı vermeli");
+    equals(game.entities.length, 1, "oyunda yerinde boş nesne kalmalı");
 
     // Prefab'dan silinen nesnenin farkı düşer, uyarı verir
     var gone = instanceData("g", 0);
@@ -1017,7 +1042,8 @@ class TestMain {
     var data = instanceData("i", 0);
     data.entities[0].overrides.push(new scene.data.SceneData.OverrideData("h", "component:crate:width", 4));
     equals(schema.check(SceneFormat.write(data), _ -> true).length, 0, "geçerli fark");
-    equals(schema.check(SceneFormat.write(data), _ -> false).length, 1, "eksik prefab dosyası derlemede yakalanmalı");
+    equals(schema.check(SceneFormat.write(data), _ -> false).length, 0, "eksik prefab dosyası derlemeyi durdurmamalı");
+    equals(schema.warnings.length, 1, "eksik prefab dosyası derlemede uyarı olmalı");
     data.entities[0].overrides[0].field = "component:crate:height";
     equals(schema.check(SceneFormat.write(data), _ -> true).length, 1, "yeniden adlandırılan alan farkta yakalanmalı");
     data.entities[0].overrides[0].field = "component:eski:width";
@@ -1673,6 +1699,139 @@ class TestMain {
     check(!NavBaker.bake(0, world, terrain, []).isBlocked(15, 10), "eğim sınırı kalkınca tepeye çıkılır");
   }
 
+  static function testDataTables() {
+    var table = new DataTable("esyalar", "Eşyalar");
+    table.columns = [
+      {name: "ad", title: "Ad", type: DataTable.TEXT},
+      {name: "deger", title: "Değer", type: DataTable.INTEGER},
+      {name: "tur", title: "Tür", type: DataTable.CHOICE, options: ["silah", "yiyecek"]},
+      {name: "sahip", title: "Sahip", type: DataTable.REFERENCE, table: "fraksiyonlar"},
+    ];
+    var sword = table.addRow("kilic");
+    equals(sword.get("deger"), 0, "tam sayı varsayılanı");
+    equals(sword.get("tur"), "silah", "seçim varsayılanı ilk seçenek");
+    sword.set("ad", "Kılıç \"keskin\"");
+    equals(table.freeId("kilic"), "kilic_2", "boş kimlik");
+    table.addRow("ekmek").set("ad", "");
+    var text = table.write();
+    var read = DataTable.read("esyalar", text);
+    equals(read.rows.length, 2, "satırlar okunmalı");
+    equals(read.find("kilic").get("ad"), "Kılıç \"keskin\"", "tırnaklı metin korunmalı");
+    equals(read.write(), text, "tablo dosyası kararlı");
+    equals(read.label("kilic"), "kilic (Kılıç \"keskin\")", "liste etiketi addan gelir");
+    equals(read.label("ekmek"), "ekmek", "adsız satır kimlikle görünür");
+    check(text.split("\n").length >= 8, "her satır ayrı satıra yazılmalı");
+    read.columns.push({name: "agirlik", title: "Ağırlık", type: DataTable.NUMBER});
+    check(read.write().indexOf('"agirlik": 0') >= 0, "yeni sütun varsayılanla yazılmalı");
+
+    var files = ["data/esyalar.table.json" => text];
+    var data = new GameData(path -> files.get(path));
+    check(data.exists("esyalar", "kilic"), "oyun satırı bulmalı");
+    check(!data.exists("esyalar", "yok"), "olmayan satır");
+    check(!data.exists("yok", "kilic"), "olmayan tablo");
+
+    // Derleme: tablodan silinen satırı kullanan sahne durur
+    var schema = new SceneSchema();
+    schema.add(["spawn"], ["faction" => "String"], null, ["faction" => "fraksiyonlar"]);
+    var scene = new SceneData(SceneFormat.VERSION);
+    var item = new EntityData("a", "Kamp");
+    var spawn = new ComponentData("spawn");
+    spawn.fields.set("faction", "haydut");
+    item.components.push(spawn);
+    scene.entities.push(item);
+    equals(schema.check(SceneFormat.write(scene), null, (t, id) -> id == "haydut").length, 0, "var olan satır");
+    // Satır içeriktir: silinmesi ekibin derlemesini durdurmaz, uyarı olur.
+    var problems = schema.check(SceneFormat.write(scene), null, (t, id) -> false);
+    equals(problems.length, 0, "silinen satır derlemeyi durdurmamalı");
+    equals(schema.warnings.length, 1, "silinen satır uyarı olmalı");
+    check(schema.warnings[0].indexOf("fraksiyonlar") >= 0, 'uyarı tabloyu söylemeli: ${schema.warnings[0]}');
+    schema.check(SceneFormat.write(scene), null, (t, id) -> true);
+    equals(schema.warnings.length, 0, "uyarılar her kontrolde sıfırlanmalı");
+  }
+
+  static function questDialog() {
+    var dialog = Dialog.create("muhtar", "Muhtar");
+    var line = dialog.node(2);
+    line.speaker = "Muhtar";
+    line.text = "Haydutlar kılıcımı çaldı.";
+    line.next = 4;
+    dialog.nodes.push({id: 4, type: Dialog.CONDITION, x: 0, y: 0, kind: Dialog.ITEM, name: "kilic", value: 1, yes: 5, no: 6});
+    dialog.nodes.push({id: 5, type: Dialog.LINE, x: 0, y: 0, speaker: "Muhtar", text: "Kılıcımı buldun!", next: 3});
+    dialog.nodes.push({id: 6, type: Dialog.CHOICES, x: 0, y: 0, choices: [{text: "Yardım ederim", next: 7}, {text: "Hayır", next: 3}]});
+    dialog.nodes.push({id: 7, type: Dialog.EVENT, x: 0, y: 0, event: "gorev_kabul", next: 3});
+    return dialog;
+  }
+
+  static function testStory() {
+    var dialog = questDialog();
+    var text = dialog.write();
+    var read = Dialog.read("muhtar", text);
+    equals(read.write(), text, "diyalog dosyası kararlı");
+    equals(read.nodes.length, 7, "düğümler okunmalı");
+    var shuffled = read.clone();
+    shuffled.nodes.reverse();
+    equals(shuffled.write(), text, "düğüm sırası dosyayı değiştirmemeli");
+
+    var files = ["data/dialogs/muhtar.dialog.json" => text];
+    var story = new Story(path -> files.get(path));
+    var scene = newScene(Game);
+    var types = registry();
+    types.register(GiveCount);
+    types.register(NeedFlag);
+    var events = new SceneInstance(types, Game, new Object());
+    var reward = events.createEntity("Ödül", "o");
+    reward.addComponent(new NeedFlag());
+    var give = new GiveCount();
+    reward.addComponent(give);
+    story.listen("gorev_kabul", reward);
+
+    // Kılıç yok: seçenekler gelir
+    story.startDialog("muhtar");
+    var runner = story.dialog;
+    check(runner != null, "diyalog açılmalı");
+    equals(runner.speaker, "Muhtar", "konuşan");
+    equals(runner.text, "Haydutlar kılıcımı çaldı.", "satır");
+    runner.next();
+    equals(runner.choices.join("|"), "Yardım ederim|Hayır", "eşya yoksa seçenek dalı");
+    // Koşul sağlanmadığı için olay eylem çalıştırmaz
+    runner.choose(0);
+    check(runner.finished, "olaydan sonra bitmeli");
+    equals(story.state.count("ekmek"), 0, "koşul sağlanmazsa eylem çalışmamalı");
+    story.closeDialogIfFinished();
+    check(story.dialog == null, "biten diyalog kapanmalı");
+
+    story.state.setFlag("izin", 1);
+    story.emit("gorev_kabul");
+    equals(story.state.count("ekmek"), 2, "olay eylemi çalıştırmalı");
+
+    // Kılıç varsa diğer dal
+    story.state.give("kilic", 1);
+    story.startDialog("muhtar");
+    story.dialog.next();
+    equals(story.dialog.text, "Kılıcımı buldun!", "eşya varsa evet dalı");
+    story.dialog.next();
+    check(story.dialog.finished, "bitiş");
+
+    story.startDialog("yok");
+    check(story.dialog == null || story.dialog.finished, "olmayan diyalog açılmamalı");
+    equals(story.messages[story.messages.length - 1], "Diyalog bulunamadı: yok", "olmayan diyalog bildirilmeli");
+
+    // Düğüm silinince bağlantılar da kalkar
+    var removed = questDialog();
+    removed.remove(7);
+    equals(removed.node(6).choices[0].next, 0, "silinen düğüme bağlantı kalkmalı");
+    equals(removed.freeId(), 7, "boş kimlik");
+
+    // Durum
+    var state = new GameState();
+    state.give("ekmek", 3);
+    state.give("ekmek", -3);
+    check(!state.items.exists("ekmek"), "biten eşya listeden çıkmalı");
+    state.changeStanding("kasaba", 10);
+    state.changeStanding("kasaba", -4);
+    equals(state.standingWith("kasaba"), 6, "ilişki birikmeli");
+  }
+
   static function testValidator() {
     var types = new ComponentRegistry();
     types.register(Pointer);
@@ -1779,6 +1938,8 @@ class TestMain {
     testTerrainModels();
     testNavRules();
     testSurfaces();
+    testDataTables();
+    testStory();
     testEnvironment();
     testPrefabFailures();
     testPrefabSchema();

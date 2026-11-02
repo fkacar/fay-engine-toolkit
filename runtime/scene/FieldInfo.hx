@@ -17,6 +17,8 @@ enum FieldHint {
   HPrefab;
   HColor;
   HChoice(options : Array<String>);
+  HRef(table : String);
+  HDialog;
 }
 
 typedef FieldInfo = {

@@ -31,17 +31,31 @@ class SceneCheck {
         var path = directory + "/" + name;
         var pos = Context.makePosition({file: path, min: 0, max: 0});
         var resources = haxe.io.Path.directory(directory);
-        for (problem in schema.check(File.getContent(path), prefab -> FileSystem.exists('$resources/$prefab'))) {
+        for (problem in schema.check(File.getContent(path), prefab -> FileSystem.exists('$resources/$prefab'), (table, id) -> rowExists('$resources/${scene.data.GameData.DIRECTORY}', table, id))) {
           Context.reportError(problem, pos);
           failed = true;
         }
-        if (StringTools.endsWith(name, PREFAB_EXTENSION) && scene.data.Prefabs.rootOf(SceneFormat.read(File.getContent(path))) == null) {
-          Context.reportError('$name: prefab tek köklü olmalı', pos);
-          failed = true;
-        }
+        for (warning in schema.warnings) Context.warning(warning, pos);
+        // Okunamayan dosya yukarıda hata olarak raporlandı.
+        var prefab = StringTools.endsWith(name, PREFAB_EXTENSION) ? try SceneFormat.read(File.getContent(path)) catch (e : Dynamic) null : null;
+        if (prefab != null && scene.data.Prefabs.rootOf(prefab) == null)
+          Context.warning('$name: prefab tek köklü olmalı. Oyunda bu prefab\'ın kopyaları boş kalır, editörde nesneleri tek kökün altına al.', pos);
       }
       if (failed) Context.fatalError("Sahne dosyaları kodla uyuşmuyor", Context.currentPos());
     });
+  }
+
+  static var tables = new Map<String, Null<scene.data.DataTable>>();
+
+  static inline var DIALOG_REFERENCE = "@diyalog";
+
+  static function rowExists(directory : String, table : String, id : String) {
+    if (table == DIALOG_REFERENCE)
+      return FileSystem.exists(haxe.io.Path.directory(directory) + '/${scene.story.Dialog.DIRECTORY}/$id${scene.story.Dialog.SUFFIX}');
+    var path = '$directory/$table${scene.data.DataTable.SUFFIX}';
+    if (!tables.exists(path)) tables.set(path, FileSystem.exists(path) ? scene.data.DataTable.read(table, File.getContent(path)) : null);
+    var data = tables.get(path);
+    return data != null && data.find(id) != null;
   }
 
   static function sceneFiles(directory : String) {
@@ -54,6 +68,7 @@ class SceneCheck {
     var ids = strings(cls.meta.extract(":component")).concat(strings(cls.meta.extract(":formerly")));
     var fields = new Map<String, String>();
     var options = new Map<String, Array<String>>();
+    var refs = new Map<String, String>();
     var current = cls;
     while (current != null) {
       for (field in current.fields.get()) {
@@ -63,11 +78,13 @@ class SceneCheck {
         for (name in names) {
           fields.set(name, kind);
           if (field.meta.has(":choice")) options.set(name, strings(field.meta.extract(":choice")));
+          if (field.meta.has(":ref")) refs.set(name, strings(field.meta.extract(":ref"))[0]);
+          if (field.meta.has(":dialog")) refs.set(name, DIALOG_REFERENCE);
         }
       }
       current = current.superClass == null ? null : current.superClass.t.get();
     }
-    schema.add(ids, fields, options);
+    schema.add(ids, fields, options, refs);
   }
 
   static function strings(entries : Array<haxe.macro.Expr.MetadataEntry>) : Array<String> {

@@ -59,6 +59,17 @@ Metin alanının anlamı işaretlenirse Inspector uygun girişi gösterir, kayı
 @:editable("Renk") @:color public var tint : Int = 0xFF8000;    // Renk seçici
 ```
 
+Tablo ve diyalog alanları:
+
+```haxe
+@:editable("Fraksiyon") @:ref("fraksiyonlar") public var faction : String = "tarafsiz";  // res/data/fraksiyonlar.table.json
+@:editable("Diyalog") @:dialog public var dialog : String = "";                          // res/data/dialogs/<id>.dialog.json
+```
+
+Tabloda olmayan satır veya olmayan diyalog derleme uyarısı verir ama derlemeyi durdurmaz, editörde Uyarılar panelinde görünür. Bunlar kod değil içeriktir: bir tasarımcının silmesi veya iki kişinin birleştirmesi ekibin editörünü açılmaz hale getirmemelidir. Veri paneli kullanılan satırın silinmesini ve kimliğinin değişmesini engeller (`scene.editor.DataUsage`). Kod tarafındaki uyuşmazlıklar, yani bileşen, alan ve `@:choice` seçenekleri, derlemeyi durdurmaya devam eder.
+
+Bileşen `title()` ile Türkçe adını, `category()` ile "Bileşen ekle" grubunu, `issues()` ile Uyarılar paneline düşecek kendi kurallarını verir.
+
 `@:choice` alanı `String` olmalı ve varsayılanı seçeneklerden biri olmalıdır. Seçenek koddan çıkarılınca o değeri kullanan sahne, prefab veya prefab farkı derlemeyi durdurur.
 
 Görseli `entity.object` altında olmayan bileşen (sahne köküne bağlı birim gibi) `visuals()` döndürür. Seçim ve gizleme bu görselleri de kapsar.
@@ -142,6 +153,16 @@ Arazi modeli `assets/terrain/` altındaki FBX'ten gelir. FBX `.editor/terrain/` 
 
 Yol bulma `NavWorld.findPath` ile yapılır. Hücre başına düğüm ızgarasıdır, saf Haxe'dir, yerel kütüphane gerektirmez. Hücreler ilk gerektiğinde okunur, yol ağı olmayan hücre yürünebilir sayılır. Recast'e geçilirse `NavWorld` ve `NavBaker` değişir, bileşenler etkilenmez.
 
+## Görevler ve diyaloglar
+
+`scene.story` paketidir. Oyun `Story` kurar ve `level.provide(Story, story)` ile verir; oyun durumu (`GameState`: eşya, değişken, fraksiyon ilişkisi), açık diyalog ve adlı olaylar oradadır.
+
+- Koşul `TriggerCondition`'dan, eylem `TriggerAction`'dan türeyen bileşendir. Tetikleyici nesnesine eklenir, `story.fire(entity)` bütün koşullar sağlanırsa eylemleri bileşen sırasıyla çalıştırır.
+- Diyalog `Dialog` biçimindedir, `DialogRunner` oynatır. Olay düğümü `story.emit(ad)` çağırır, `story.listen(ad, entity)` ile bekleyen tetikleyici çalışır. Eşya ve değişken işleri böylece tek yerde, eylemlerde kalır.
+- Diyalog kutusunun çizimi oyuna aittir: `story.dialog` okunur, `next()` ve `choose(i)` çağrılır.
+
+Oyun verisi `scene.data.DataTable` ve `GameData` ile okunur. Her tablo `res/data/<ad>.table.json` dosyasıdır.
+
 ## Prefab
 
 Prefab dosyası `res/prefabs/ad.prefab.json`, tek köklü küçük bir sahnedir. Sahne yalnızca kök satırını tutar: `prefab` yolu ve `overrides` listesi. Alt nesneler yüklenirken açılır, kimlikleri `kök/parça` biçimindedir. Farklar elle izlenmez, kayıtta prefab'la karşılaştırılarak bulunur.
@@ -152,7 +173,7 @@ Oyun, sahneyi yüklemeden önce dosya okuyucuyu verir:
 level.prefabLoader = path -> hxd.Res.load(path).toText();
 ```
 
-Derleme kontrolü için `common.hxml` içine `--macro scene.macro.SceneCheck.run("res/prefabs")` eklenir. Eksik prefab dosyası, iki köklü prefab ve artık kodda olmayan bir alanı gösteren fark derlemeyi durdurur. Editörde bozuk prefab sahneyi düşürmez, kök nesne yolu ve farklarıyla korunur.
+Derleme kontrolü için `common.hxml` içine `--macro scene.macro.SceneCheck.run("res/prefabs")` eklenir. Artık kodda olmayan bir alanı gösteren fark derlemeyi durdurur. Eksik prefab dosyası ve iki köklü prefab ise içeriktir: derleme uyarı verir, durmaz, `push.sh` uyarıyı onaydan önce gösterir. Açılamayan prefab sahneyi düşürmez: editörde kök nesne yolu ve farklarıyla korunur, oyunda boş nesne olarak kurulur ve `Sahne uyarısı` yazılır.
 
 ## Yeniden adlandırma
 

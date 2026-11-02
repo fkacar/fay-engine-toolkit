@@ -26,6 +26,7 @@ private typedef Editable = {
 //   @:editable("Hedef") @:entity var target : String = "";
 //   @:editable("Parça") @:prefab var part : String = "";
 //   @:editable("Tür") @:choice("kolay", "zor") var kind : String = "kolay";
+//   @:editable("Fraksiyon") @:ref("fraksiyonlar") var faction : String = "tarafsiz";
 //   @:editable("Renk") @:color var tint : Int = 0xFF8000;
 //   @:editable("Etiketler") var tags : Array<String> = [];
 class ComponentMacro {
@@ -111,8 +112,14 @@ class ComponentMacro {
       checkChoiceDefault(field, options);
       return macro scene.FieldInfo.FieldHint.HChoice($v{options});
     }
+    var ref = Lambda.find(field.meta, entry -> entry.name == ":ref");
+    if (ref != null) {
+      var tables = strings([ref]);
+      if (tables.length != 1) Context.error('@:ref alan ${field.name}: tek bir tablo adı verilmeli', field.pos);
+      return macro scene.FieldInfo.FieldHint.HRef($v{tables[0]});
+    }
     var name = "HNone";
-    for (hint in [":asset" => "HAsset", ":entity" => "HEntity", ":prefab" => "HPrefab", ":color" => "HColor"].keyValueIterator())
+    for (hint in [":asset" => "HAsset", ":entity" => "HEntity", ":prefab" => "HPrefab", ":color" => "HColor", ":dialog" => "HDialog"].keyValueIterator())
       if (Lambda.exists(field.meta, entry -> entry.name == hint.key)) name = hint.value;
     return macro $p{["scene", "FieldInfo", "FieldHint", name]};
   }

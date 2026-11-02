@@ -7,12 +7,16 @@ import imgui.types.ImFontAtlas.ImFontTexData;
 import scene.FocusGuard;
 import scene.HiDpi;
 import scene.Marker;
+import scene.nav.NavWorld;
+import scene.story.Dialog;
 import scene.world.WorldData;
 import scene.world.WorldState;
 import scene.PlayOptions;
 import scene.editor.panels.AssetBrowser;
 import scene.editor.panels.HierarchyPanel;
 import scene.editor.panels.InspectorPanel;
+import scene.editor.panels.DataPanel;
+import scene.editor.panels.DialogPanel;
 import scene.editor.panels.WorldPanel;
 import sys.FileSystem;
 
@@ -26,7 +30,7 @@ typedef Panel = {
 class Editor {
   static inline var LAYOUT_FILE = "imgui.ini";
   // Düzen değişince artırılır: eski ölçülerle kaydedilmiş panel düzeni bir kez yenilenir.
-  static inline var LAYOUT_VERSION = 3;
+  static inline var LAYOUT_VERSION = 4;
   static inline var FONT_PATH = "libs/scene-toolkit/editor/fonts/DejaVuSansMono.ttf";
   static inline var FONT_SIZE = 15;
   static inline var HIERARCHY = "Hierarchy";
@@ -34,6 +38,8 @@ class Editor {
   static inline var ASSETS = "Asset Browser";
   static inline var WARNINGS = "Uyarılar";
   static inline var WORLD = "Dünya";
+  static inline var DATA = "Veri";
+  static inline var DIALOGS = "Diyaloglar";
   static inline var DIRTY_POPUP = "Kaydedilmemiş değişiklik";
   static inline var SAVE_AS_POPUP = "Farklı kaydet";
   static inline var RECOVERY_POPUP = "Otomatik yedek";
@@ -59,6 +65,8 @@ class Editor {
   public var viewport(default, null) : Viewport;
   public var hierarchy(default, null) : HierarchyPanel;
   public var importer(default, null) = new AssetImporter();
+  public var data(default, null) = new DataStore();
+  public var dialogs(default, null) = new DialogStore();
   public var previews(default, null) = new ModelPreview();
   public var trace(default, null) = new InputTrace();
   public var interfaceScale(default, null) = 1.;
@@ -71,6 +79,9 @@ class Editor {
   var inspector : InspectorPanel;
   var assets : AssetBrowser;
   var worldPanel : WorldPanel;
+  var dataPanel : DataPanel;
+  var dialogPanel : DialogPanel;
+  var keyboardPanelFocused = false;
   var session = new PlaySession();
   var panels : Array<Panel> = [];
   var messages : Array<String> = [];
@@ -104,6 +115,10 @@ class Editor {
 
     selection.expand = entities -> groups.expand(entities, scene);
     validator = new Validator(assetExists);
+    validator.refExists = data.exists;
+    validator.dialogExists = dialogs.exists;
+    validator.rules.push(_ -> dialogIssues());
+    if (world != null) scene.provide(NavWorld, new NavWorld(world));
     document = new SceneDocument(this, scene, path, world);
     validator.rules.push(_ -> document.prefabRootIssues());
     validator.isPartial = () -> document.world != null && !document.world.isComplete();
@@ -114,6 +129,8 @@ class Editor {
     inspector = new InspectorPanel(this);
     assets = new AssetBrowser(this);
     worldPanel = new WorldPanel(this);
+    dataPanel = new DataPanel(this);
+    dialogPanel = new DialogPanel(this);
     if (WorldData.isWorldFile(path)) document.open(path);
     document.validate();
     for (type in document.prefs.hiddenMarkers) Marker.hiddenTypes.set(type, true);
@@ -123,6 +140,8 @@ class Editor {
     addPanel(ASSETS, assets.draw);
     addPanel(WARNINGS, drawWarnings);
     addPanel(WORLD, worldPanel.draw);
+    addPanel(DATA, dataPanel.draw);
+    addPanel(DIALOGS, dialogPanel.draw);
   }
 
   public function addPanel(title : String, draw : Void->Void) {
@@ -137,6 +156,7 @@ class Editor {
     if (failure != null) report(failure);
 
     readShortcuts();
+    keyboardPanelFocused = false;
     drawMenu();
     drawDockSpace();
     for (panel in panels) {
@@ -254,6 +274,7 @@ class Editor {
       if (io.WantTextInput) return;
       if (Key.isPressed(Key.Z)) Key.isDown(Key.SHIFT) ? redo() : undo();
       if (Key.isPressed(Key.Y)) redo();
+      if (isPanelFocused()) return;
       if (Key.isPressed(Key.C)) actions.copy();
       if (Key.isPressed(Key.V)) actions.paste();
       if (Key.isPressed(Key.D)) actions.duplicate();
@@ -261,6 +282,8 @@ class Editor {
     }
     if (io.WantCaptureKeyboard) return;
     if (Key.isPressed(Key.F5)) play();
+    // Diyalog ve veri panelinde Delete düğümü veya satırı siler, sahnedeki nesneye dokunmaz.
+    if (isPanelFocused()) return;
     if (Key.isPressed(Key.F2)) hierarchy.rename(selection.primary);
     if (Key.isPressed(Key.F)) actions.focus();
     if (Key.isPressed(Key.END)) actions.snapToGround();
@@ -270,6 +293,34 @@ class Editor {
     if (Key.isPressed(Key.NUMBER_1)) viewport.gizmo.tool = Move;
     if (Key.isPressed(Key.NUMBER_2)) viewport.gizmo.tool = Rotate;
     if (Key.isPressed(Key.NUMBER_3)) viewport.gizmo.tool = Scale;
+  }
+
+  // Diyaloglarda boş bırakılan alanlar oyunda sessizce hiçbir şey yapmaz.
+  function dialogIssues() : Array<Validator.Issue> {
+    var issues : Array<Validator.Issue> = [];
+    for (id in dialogs.ids()) {
+      var dialog = dialogs.dialogs.get(id);
+      for (node in dialog.nodes) {
+        var problem = switch (node.type) {
+          case Dialog.EVENT if (node.event == null || node.event == ""): "olay adı boş";
+          case Dialog.CONDITION if (node.name == null || node.name == ""): "koşulun adı boş";
+          case Dialog.CHOICES if (node.choices == null || Lambda.exists(node.choices, choice -> choice.text == "")): "boş seçenek var";
+          case Dialog.LINE if (node.text == null || node.text == ""): "satır boş";
+          default: null;
+        };
+        if (problem != null) issues.push({entity: null, message: 'Diyalog ${dialog.title}: $problem'});
+      }
+    }
+    return issues;
+  }
+
+  // Önceki karenin değeridir; paneller çizilmeden önce sıfırlanır, gizli panel kilitlemez.
+  function isPanelFocused() {
+    return keyboardPanelFocused;
+  }
+
+  public function claimKeyboard() {
+    if (ImGui.isWindowFocused(ImGuiFocusedFlags.RootAndChildWindows)) keyboardPanelFocused = true;
   }
 
   function undo() {
@@ -495,6 +546,8 @@ class Editor {
     ImGui.dockBuilderDockWindow(INSPECTOR, right);
     ImGui.dockBuilderDockWindow(WORLD, right);
     ImGui.dockBuilderDockWindow(WARNINGS, bottom);
+    ImGui.dockBuilderDockWindow(DATA, bottom);
+    ImGui.dockBuilderDockWindow(DIALOGS, bottom);
     ImGui.dockBuilderDockWindow(ASSETS, bottom);
     ImGui.dockBuilderFinish(dock);
   }
@@ -503,7 +556,7 @@ class Editor {
     if (document.warningCount() == 0 && messages.length == 0) ImGui.textDisabled("Uyarı yok");
     for (i in 0...document.issues.length) {
       var issue = document.issues[i];
-      if (!ImGui.selectable(issue.message + "##" + i) || !scene.contains(issue.entity)) continue;
+      if (!ImGui.selectable(issue.message + "##" + i) || issue.entity == null || !scene.contains(issue.entity)) continue;
       selection.set([issue.entity]);
       hierarchy.reveal(issue.entity);
     }

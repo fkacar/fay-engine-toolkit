@@ -334,13 +334,15 @@ class SceneInstance {
     return entity;
   }
 
-  // Açılamazsa null döner: bozuk prefab sahneyi düşürmez.
+  // Açılamazsa null döner: eksik veya bozuk prefab sahneyi düşürmez, oyunda da çökertmez.
+  // Derleme bunu durdurmaz (içeriktir), oyun nesneyi boş olarak kurar ve uyarı yazar.
   function expandPrefab(item : EntityData) {
     try {
       return Prefabs.expand(item, prefabData, warn);
     } catch (e : Dynamic) {
-      if (mode == Game) throw e;
-      warn('${item.name}: prefab açılamadı (${item.prefab}): $e');
+      var reason = Std.string(e);
+      for (missing in ["not found", "No such file", "Can't open"]) if (reason.indexOf(missing) >= 0) reason = "dosya yok";
+      warn('${item.name}: prefab açılamadı (${item.prefab}): $reason');
       return null;
     }
   }

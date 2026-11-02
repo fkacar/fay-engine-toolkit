@@ -96,6 +96,9 @@ if [ "$TOOLKIT_BEHIND" != 0 ]; then
   fi
 fi
 
+# Eksik satır, diyalog veya prefab derlemeyi durdurmaz (ekip editörü açıp düzeltebilsin diye),
+# yalnızca uyarı verir. Gönderen kişi onaydan önce bunları görür.
+CONTENT_WARNINGS=""
 if [ "$BUILD" = 1 ] && [ "$TOOLKIT_BEHIND" = 0 ]; then
   echo "Derleme ve testler kontrol ediliyor..."
   LOG=$(mktemp)
@@ -104,6 +107,8 @@ if [ "$BUILD" = 1 ] && [ "$TOOLKIT_BEHIND" = 0 ]; then
       tail -15 "$LOG" >&2
       stop "$hxml geçmedi."
     }
+    FOUND=$(grep -E '\.(scene|prefab)\.json:[0-9]+: .*Warning : ' "$LOG" | sed 's/.*Warning : //')
+    [ -z "$FOUND" ] || CONTENT_WARNINGS=$(printf '%s\n%s' "$CONTENT_WARNINGS" "$FOUND" | sed '/^$/d' | sort -u)
   done
 fi
 
@@ -126,6 +131,11 @@ if [ -n "$GAME_CHANGES" ]; then
   git status --short
 fi
 [ "$GAME_AHEAD" = 0 ] || echo "Oyunda gönderilmemiş commit: $GAME_AHEAD"
+if [ -n "$CONTENT_WARNINGS" ]; then
+  echo
+  echo "Uyarı: sahnelerde eksik içerik var. Oyun açılır ama bu nesneler eksik kalır, editörde Uyarılar panelinde görünür:"
+  printf '%s\n' "$CONTENT_WARNINGS" | sed 's/^/  /'
+fi
 echo
 
 if [ "$DRY_RUN" = 1 ]; then

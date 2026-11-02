@@ -166,7 +166,7 @@ class InspectorPanel {
     var component = peers[peers.length - 1];
     var name = component.componentId();
     ImGui.pushID(name);
-    var open = ImGui.collapsingHeader(name, ImGuiTreeNodeFlags.DefaultOpen);
+    var open = ImGui.collapsingHeader(component.title() + "##" + name, ImGuiTreeNodeFlags.DefaultOpen);
     if (component.entity.instanceRoot == null && ImGui.beginPopupContextItem()) {
       if (ImGui.menuItem("Bileşeni kaldır")) removing = peers;
       ImGui.endPopup();
@@ -179,15 +179,28 @@ class InspectorPanel {
     ImGui.popID();
   }
 
+  // Bileşenler gruplanır: tetikleyiciye koşul ve eylem eklemek de buradan yapılır.
   function drawAddComponent(entities : Array<Entity>) {
     ImGui.separator();
     if (ImGui.button("Bileşen ekle")) ImGui.openPopup(ADD_COMPONENT);
     if (!ImGui.beginPopup(ADD_COMPONENT)) return;
     var registry = editor.scene.registry;
+    var groups = new Map<String, Array<Component>>();
     for (type in registry.currentTypes()) {
-      if (!ImGui.selectable(type)) continue;
-      var commands : Array<Command> = [for (entity in entities) new AddComponentCommand(entity, registry.create(type))];
-      editor.commands.execute(new GroupCommand("Bileşen ekle", commands));
+      var sample = registry.create(type);
+      if (!groups.exists(sample.category())) groups.set(sample.category(), []);
+      groups.get(sample.category()).push(sample);
+    }
+    var names = [for (name in groups.keys()) name];
+    names.sort(Reflect.compare);
+    for (name in names) {
+      ImGui.textDisabled(name);
+      for (sample in groups.get(name)) {
+        if (!ImGui.selectable(sample.title() + "##" + sample.componentId())) continue;
+        var type = sample.componentId();
+        var commands : Array<Command> = [for (entity in entities) new AddComponentCommand(entity, registry.create(type))];
+        editor.commands.execute(new GroupCommand("Bileşen ekle", commands));
+      }
     }
     ImGui.endPopup();
   }
@@ -215,6 +228,12 @@ class InspectorPanel {
           case HEntity: drawEntityField(peers, field, label, before);
           case HPrefab: drawOptions(peers, field, label, before, editor.actions.prefabFiles(), true);
           case HChoice(options): drawOptions(peers, field, label, before, options, false);
+          case HDialog:
+            var dialogs = editor.dialogs;
+            drawOptions(peers, field, label, before, dialogs.ids(), true, id -> dialogs.exists(id) ? '$id (${dialogs.dialogs.get(id).title})' : id);
+          case HRef(table):
+            var data = editor.data.tables.get(table);
+            drawOptions(peers, field, label, before, data == null ? [] : data.ids(), true, id -> data == null ? id : data.label(id));
           default:
             var value : String = before;
             var edited = ImGui.inputText(label, value);
@@ -241,15 +260,17 @@ class InspectorPanel {
     trackEdit(peers, field, packed, edited);
   }
 
-  function drawOptions(peers : Array<Component>, field : FieldInfo, label : String, before : String, options : Array<String>, canBeEmpty : Bool) {
-    var preview = before == "" ? "(yok)" : options.indexOf(before) < 0 ? '$before (bulunamadı)' : before;
+  function drawOptions(peers : Array<Component>, field : FieldInfo, label : String, before : String, options : Array<String>, canBeEmpty : Bool,
+      ?title : String->String) {
+    if (title == null) title = option -> option;
+    var preview = before == "" ? "(yok)" : options.indexOf(before) < 0 ? '$before (bulunamadı)' : title(before);
     if (!ImGui.beginCombo(label, preview)) return;
     // hlimgui sabit değeri Ref sürümüne bağlar ve yerel kodda çöker: değer değişkenle verilir.
     var empty = before == "";
     if (canBeEmpty && ImGui.selectable("(yok)", empty)) set(peers, field, "");
     for (option in options) {
       var chosen = option == before;
-      if (ImGui.selectable(option, chosen)) set(peers, field, option);
+      if (ImGui.selectable(title(option), chosen)) set(peers, field, option);
     }
     ImGui.endCombo();
   }

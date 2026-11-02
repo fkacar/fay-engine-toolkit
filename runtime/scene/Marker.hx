@@ -24,8 +24,12 @@ class Marker extends Component {
   }
 
   // Menüde ve yeni nesnenin adında görünür.
-  public function title() : String {
+  override public function title() : String {
     return componentId();
+  }
+
+  override public function category() : String {
+    return "İşaretçi";
   }
 
   // Menüden doğrudan eklenebilir mi? Rota noktası gibi türler kendi başına eklenmez.
