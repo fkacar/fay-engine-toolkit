@@ -2,6 +2,10 @@ package scene.editor;
 
 import scene.data.SceneData;
 import scene.data.SceneFormat;
+import scene.data.ThreeWay;
+import scene.data.ThreeWay.MergeOutcome;
+import scene.editor.commands.SetDialogCommand;
+import scene.editor.commands.SetTableCommand;
 import scene.editor.Validator.Issue;
 import scene.world.WorldData;
 import scene.world.WorldState;
@@ -27,6 +31,9 @@ class SceneDocument {
   public var world(default, null) : Null<WorldDocument>;
 
   var worlds : Null<WorldDocument>;
+  // Tek sahne kipinde diskten son okunan veya yazılan hal: kaydederken birleştirmenin tabanı.
+  var sceneBase : Null<String>;
+  var notifiedPending = 0;
   var worldFile = "";
   var editor : Editor;
   var scene : SceneInstance;
@@ -66,10 +73,17 @@ class SceneDocument {
     var written = 1;
     try {
       if (world != null) written = world.save();
-      else File.saveContent(path, SceneFormat.write(scene.toData()));
+      else written = saveScene();
       written += editor.data.save() + editor.dialogs.save();
     } catch (e : Dynamic) {
       editor.show('Kaydedilemedi: $e', true);
+      return false;
+    }
+    // Çakışan dosya kaydedilmedi: belge kaydedilmiş sayılmaz, kapatırken yine sorulur.
+    var conflicts = editor.diskGuard.conflicts.length;
+    if (conflicts > 0) {
+      validate();
+      editor.show('$conflicts dosya kaydedilmedi: dışarıda da değişmiş ve aynı yerler çakışıyor. Uyarılar paneline bak', true);
       return false;
     }
     editor.commands.markSaved();
@@ -95,14 +109,21 @@ class SceneDocument {
       return false;
     }
     path = target;
+    sceneBase = DiskGuard.read(target);
     return save();
   }
 
   public function open(target : String) {
     var isWorld = WorldData.isWorldFile(target) && worlds != null;
+    editor.diskGuard.forgetAll();
     try {
       if (isWorld) worlds.open(prefs.cellsIn(target), target);
-      else scene.load(SceneFormat.read(File.getContent(target)));
+      else {
+        var text = File.getContent(target);
+        scene.load(SceneFormat.read(text));
+        sceneBase = text;
+        editor.diskGuard.observe(target, text);
+      }
     } catch (e : Dynamic) {
       editor.show('Açılamadı: $e', true);
       prefs.removeRecent(target);
@@ -115,11 +136,115 @@ class SceneDocument {
     loaded('Açıldı: $target');
   }
 
+  // Açık dosyalar dışarıda değişti mi: temiz olanlar yeniden yüklenir, kaydedilmemiş değişikliği
+  // olanlar kaydederken birleşir.
+  public function checkDisk() {
+    var reloaded = world != null ? world.checkDisk() : checkScene();
+    reloaded = reloaded.concat(editor.data.checkDisk()).concat(editor.dialogs.checkDisk());
+    if (reloaded.length > 0) {
+      validate();
+      editor.show(reloaded.length == 1 ? 'Dışarıda değişti, yeniden yüklendi: ${reloaded[0]}' : 'Dışarıda değişti, yeniden yüklendi: ${reloaded.length} dosya');
+    }
+    var pending = Lambda.count(editor.diskGuard.pending);
+    if (pending > notifiedPending) editor.show("Kaydedilmemiş değişikliğin olan bir dosya dışarıda değişti: kaydedince birleştirilecek");
+    notifiedPending = pending;
+  }
+
+  // Kaydedilmemiş bütün dosyalar: sahne veya hücreler, tablolar, diyaloglar.
+  public function unsavedFiles() : Array<String> {
+    var files = world != null ? world.unsavedFiles() : sceneBase == null && scene.entities.length == 0
+      || sceneBase != null && SceneFormat.write(scene.toData()) == canonical(sceneBase) ? [] : [path];
+    return files.concat(editor.data.unsavedFiles()).concat(editor.dialogs.unsavedFiles());
+  }
+
+  // Bir dosyanın editördeki hali: kaydedilirse yazılacak metin.
+  public function editorText(file : String) : Null<String> {
+    if (world != null && StringTools.startsWith(file, "res/world/")) return world.editorText(file);
+    if (world == null && file == path) return SceneFormat.write(scene.toData());
+    var table = editor.data.editorText(file);
+    return table != null ? table : editor.dialogs.editorText(file);
+  }
+
+  function checkScene() : Array<String> {
+    var change = editor.diskGuard.changed(path);
+    if (change == null || change.text == sceneBase) return [];
+    var mine = SceneFormat.write(scene.toData());
+    if (mine == change.text) {
+      sceneBase = change.text;
+      return [];
+    }
+    var clean = sceneBase == null ? scene.entities.length == 0 : mine == canonical(sceneBase);
+    if (!clean || change.text == null) {
+      editor.diskGuard.pending.set(path, true);
+      return [];
+    }
+    try replaceScene(change.text) catch (e : Dynamic) {
+      editor.diskGuard.pending.set(path, true);
+      editor.show('$path okunamadı: $e', true);
+      return [];
+    }
+    sceneBase = change.text;
+    return [path];
+  }
+
+  function saveScene() : Int {
+    var mine = SceneFormat.write(scene.toData());
+    var current = DiskGuard.read(path);
+    var output : Null<String> = mine;
+    if (current != sceneBase) {
+      var result = mergeScene(sceneBase, mine, current, null);
+      if (result.text == null && result.conflicts.length > 0) {
+        editor.diskGuard.backup(path, mine, current);
+        editor.diskGuard.addConflict(path, result.conflicts, resolveScene);
+        return 0;
+      }
+      output = result.text;
+      if (output != mine) replaceScene(output);
+    }
+    if (output == null) editor.diskGuard.delete(path);
+    else editor.diskGuard.write(path, output);
+    sceneBase = output;
+    return 1;
+  }
+
+  function resolveScene(prefer : String) {
+    var current = DiskGuard.read(path);
+    var result = mergeScene(sceneBase, SceneFormat.write(scene.toData()), current, prefer);
+    editor.diskGuard.removeConflict(path);
+    if (result.text == null) editor.diskGuard.delete(path);
+    else editor.diskGuard.write(path, result.text);
+    sceneBase = result.text;
+    replaceScene(result.text);
+  }
+
+  function mergeScene(base : Null<String>, mine : Null<String>, theirs : Null<String>, prefer : Null<String>) : MergeOutcome {
+    try {
+      return ThreeWay.scene(base, mine, theirs, prefer);
+    } catch (e : Dynamic) {
+      if (prefer == null) return {text: null, conflicts: ['okunamadı: $e']};
+      return ThreeWay.whole(base, mine, theirs, prefer);
+    }
+  }
+
+  // Sahne nesneleri yeniden kurulur: onlara dokunan geri alma adımları düşer, tablo ve diyalog adımları kalır.
+  function replaceScene(text : Null<String>) {
+    scene.load(text == null ? new SceneData(SceneFormat.VERSION) : SceneFormat.read(text));
+    editor.commands.forget(command -> !Std.isOfType(command, SetTableCommand) && !Std.isOfType(command, SetDialogCommand));
+    editor.selection.clear();
+    applyFlags();
+  }
+
+  static function canonical(text : String) {
+    return try SceneFormat.write(SceneFormat.read(text)) catch (e : Dynamic) text;
+  }
+
   public function reopen() {
     open(path);
   }
 
   public function newScene() {
+    editor.diskGuard.forgetAll();
+    sceneBase = null;
     scene.load(new SceneData(SceneFormat.VERSION));
     if (world != null) world.close();
     world = null;
@@ -188,10 +313,11 @@ class SceneDocument {
   }
 
   public function warningCount() {
-    return issues.length + scene.warnings.length;
+    return issues.length + scene.warnings.length + editor.diskGuard.conflicts.length;
   }
 
   public function update(dt : Float) {
+    if (editor.diskGuard.due(dt)) checkDisk();
     autosaveTimer += dt;
     if (autosaveTimer < AUTOSAVE_SECONDS) return;
     autosaveTimer = 0;

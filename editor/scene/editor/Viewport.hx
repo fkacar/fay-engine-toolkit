@@ -46,7 +46,7 @@ class Viewport {
   public var toolbarBottom(default, null) = 0.;
 
   var editor : Editor;
-  var view : h3d.Camera;
+  public var view(default, null) : h3d.Camera;
   var mode = Idle;
   var pressX = 0.;
   var pressY = 0.;

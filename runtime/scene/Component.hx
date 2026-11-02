@@ -70,6 +70,12 @@ class Component {
     return [];
   }
 
+  // Görev bağlantıları: hangi olayı bekler veya yayar, hangi değişkeni okur veya ayarlar. Uyarılar
+  // ve ajan, yanlış yazılmış olay ve değişken adlarını bunlarla bulur.
+  public function storyLinks() : Array<scene.story.StoryLink> {
+    return [];
+  }
+
   public function issues() : Array<String> {
     return [];
   }

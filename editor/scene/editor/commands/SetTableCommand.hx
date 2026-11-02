@@ -7,7 +7,7 @@ class SetTableCommand implements Command {
   public var label(default, null) : String;
 
   var store : DataStore;
-  var name : String;
+  public var name(default, null) : String;
   var before : Null<String>;
   var after : Null<String>;
 

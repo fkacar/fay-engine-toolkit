@@ -57,6 +57,7 @@ class Main extends #if scene_editor imgui.ImGuiApp #else hxd.App #end {
   override function render(e : h3d.Engine) {
     if (editor != null) editor.render(e);
     super.render(e);
+    if (editor != null) editor.afterRender(e);
   }
   #end
 

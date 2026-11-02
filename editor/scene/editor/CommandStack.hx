@@ -20,6 +20,21 @@ class CommandStack {
 
   public function new() {}
 
+  // En yeniden eskiye.
+  public function undoLabels(count : Int) : Array<String> {
+    var labels = [];
+    var i = done.length - 1;
+    while (i >= 0 && labels.length < count) labels.push(done[i--].label);
+    return labels;
+  }
+
+  public function redoLabels(count : Int) : Array<String> {
+    var labels = [];
+    var i = undone.length - 1;
+    while (i >= 0 && labels.length < count) labels.push(undone[i--].label);
+    return labels;
+  }
+
   public function execute(command : Command) {
     command.execute();
     done.push(command);

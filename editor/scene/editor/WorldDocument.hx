@@ -3,6 +3,8 @@ package scene.editor;
 import scene.Entity;
 import scene.SceneInstance;
 import scene.data.SceneFormat;
+import scene.data.ThreeWay;
+import scene.data.ThreeWay.MergeOutcome;
 import scene.nav.NavBaker;
 import scene.nav.NavShapes;
 import scene.nav.NavWorld;
@@ -112,10 +114,7 @@ class WorldDocument {
   // Hücre kaydedilmiş sayılır: değişiklikleri varsa kayıt sorusu arayüzde sorulur.
   public function unload(cell : Int) {
     if (!isLoaded(cell)) return;
-    editor.commands.forget(command -> {
-      if (Std.isOfType(command, CellCommand) && cast(command, CellCommand).touchesCell(cell)) return true;
-      return Lambda.exists(command.touched(), entity -> cellOf(entity.root) == cell);
-    });
+    editor.commands.forget(command -> touchesCell(command, cell));
     for (root in rootsIn(cell)) scene.destroyEntity(root);
     state.unloadScatter(cell);
     loaded.remove(cell);
@@ -156,10 +155,13 @@ class WorldDocument {
     }
     var files = changedFiles();
     var binaries = changedBinaries();
-    for (path => bytes in binaries) {
-      if (bytes == null) FileSystem.deleteFile(ROOT + path);
-      else File.saveBytes(ROOT + path, bytes);
-      diskBinary.set(path, bytes);
+    for (path in [for (key in binaries.keys()) key]) {
+      if (binaryChanged(path, binaries.get(path))) {
+        binaries.remove(path);
+        editor.diskGuard.addConflict(ROOT + path, ["arazi modeli parçası"], prefer -> resolveBinary(path, prefer));
+        continue;
+      }
+      writeBinary(path, binaries.get(path));
     }
     // Değişen hücrenin yol ağı kayıtla birlikte yenilenir, eski kalması unutulmaz.
     // Eğim veya arazi modeli değişince bütün yüklü hücrelerin yol ağı etkilenir.
@@ -363,10 +365,28 @@ class WorldDocument {
       }
   }
 
+  // Yazmadan önce disk yeniden okunur: dışarıda değiştiyse birim birim birleştirilir, çakışırsa
+  // yazılmaz. Yol ağı sahneden türetildiği için her zaman editörün haliyle yazılır.
   function write(files : Map<String, String>) {
-    for (path => text in files) {
-      File.saveContent(ROOT + path, text);
-      disk.set(path, text);
+    for (path in [for (key in files.keys()) key]) {
+      var text = files.get(path);
+      var output : Null<String> = text;
+      if (!StringTools.endsWith(path, WorldData.NAV_SUFFIX)) {
+        var current = DiskGuard.read(ROOT + path);
+        if (current != disk.get(path)) {
+          var result = merge(path, disk.get(path), text, current, null);
+          if (result.text == null && result.conflicts.length > 0) {
+            conflict(path, text, current, result.conflicts);
+            files.remove(path);
+            continue;
+          }
+          output = result.text;
+          if (output != text) reloadFile(path, output);
+        }
+      }
+      if (output == null) editor.diskGuard.delete(ROOT + path);
+      else editor.diskGuard.write(ROOT + path, output);
+      disk.set(path, output);
       if (StringTools.endsWith(path, WorldData.NAV_SUFFIX))
         for (cell in data.cells()) if (data.path(cell, WorldData.NAV_SUFFIX) == path) {
           navView.forget(cell);
@@ -473,8 +493,183 @@ class WorldDocument {
   }
 
   function diskText(path : String) : Null<String> {
-    if (!disk.exists(path)) disk.set(path, FileSystem.exists(ROOT + path) ? File.getContent(ROOT + path) : null);
+    if (!disk.exists(path)) {
+      var text = DiskGuard.read(ROOT + path);
+      disk.set(path, text);
+      editor.diskGuard.observe(ROOT + path, text);
+    }
     return disk.get(path);
+  }
+
+  // Açık dosyalar dışarıda değişti mi: temizse yeniden yüklenir, değilse kaydederken birleşir.
+  public function checkDisk() : Array<String> {
+    var reloaded = [];
+    for (path in watchedFiles()) {
+      var change = editor.diskGuard.changed(ROOT + path);
+      if (change == null || !disk.exists(path) || change.text == disk.get(path)) continue;
+      var mine = fileText(path);
+      if (mine == change.text) {
+        disk.set(path, change.text);
+        continue;
+      }
+      if (!isClean(path)) {
+        editor.diskGuard.pending.set(ROOT + path, true);
+        continue;
+      }
+      try {
+        reloadFile(path, change.text);
+        reloaded.push(path);
+      } catch (e : Dynamic) {
+        editor.diskGuard.pending.set(ROOT + path, true);
+        editor.show('$path okunamadı: $e', true);
+      }
+    }
+    return reloaded;
+  }
+
+  function watchedFiles() : Array<String> {
+    var files = [data.path(WorldData.GLOBAL, WorldData.OBJECTS_SUFFIX), data.environmentPath(), manifestPath];
+    for (cell in data.cells()) files.push(data.path(cell, WorldData.TERRAIN_SUFFIX));
+    for (cell in loadedCells()) {
+      files.push(data.path(cell, WorldData.OBJECTS_SUFFIX));
+      files.push(data.path(cell, WorldData.SCATTER_SUFFIX));
+    }
+    return files;
+  }
+
+  function merge(path : String, base : Null<String>, mine : Null<String>, theirs : Null<String>, prefer : Null<String>) : MergeOutcome {
+    try {
+      if (StringTools.endsWith(path, WorldData.OBJECTS_SUFFIX)) return ThreeWay.scene(base, mine, theirs, prefer);
+    } catch (e : Dynamic) {
+      if (prefer == null) return {text: null, conflicts: ['okunamadı: $e']};
+    }
+    return ThreeWay.whole(base, mine, theirs, prefer, haxe.io.Path.withoutDirectory(path));
+  }
+
+  function conflict(path : String, mine : Null<String>, theirs : Null<String>, units : Array<String>) {
+    editor.diskGuard.backup(ROOT + path, mine, theirs);
+    editor.diskGuard.addConflict(ROOT + path, units, prefer -> resolve(path, prefer));
+  }
+
+  // Tasarımcının seçimi: çakışmayan değişiklikler iki taraftan da kalır, çakışanda seçilen taraf.
+  function resolve(path : String, prefer : String) {
+    var current = DiskGuard.read(ROOT + path);
+    var result = merge(path, disk.get(path), fileText(path), current, prefer);
+    editor.diskGuard.removeConflict(ROOT + path);
+    if (result.text == null) editor.diskGuard.delete(ROOT + path);
+    else editor.diskGuard.write(ROOT + path, result.text);
+    reloadFile(path, result.text);
+  }
+
+  // Dosyanın yeni hali editöre alınır. O dosyaya dokunan geri alma adımları düşer: Cmd+Z dışarıdan
+  // gelen değişikliği geri almasın.
+  function reloadFile(path : String, text : Null<String>) {
+    disk.set(path, text);
+    var cell = cellOfPath(path);
+    if (StringTools.endsWith(path, WorldData.OBJECTS_SUFFIX)) {
+      if (cell == WorldData.GLOBAL || isLoaded(cell)) replaceObjects(cell, text);
+    } else if (StringTools.endsWith(path, WorldData.TERRAIN_SUFFIX)) {
+      touchedTerrain.remove(cell);
+      state.loadTerrain(cell);
+    } else if (StringTools.endsWith(path, WorldData.SCATTER_SUFFIX)) {
+      touchedScatter.remove(cell);
+      if (isLoaded(cell)) {
+        state.unloadScatter(cell);
+        state.loadScatter(cell);
+      }
+    } else if (path == data.environmentPath()) {
+      touchedEnvironment = false;
+      state.reloadEnvironment();
+    } else if (path == manifestPath && text != null) {
+      touchedManifest = false;
+      data.assignSettings(WorldData.read(text, data.directory));
+    }
+    dirtyRevision = -1;
+  }
+
+  function replaceObjects(cell : Int, text : Null<String>) {
+    var entities = text == null ? [] : SceneFormat.read(text).entities;
+    editor.commands.forget(command -> touchesCell(command, cell));
+    for (root in rootsIn(cell)) scene.destroyEntity(root);
+    var created = scene.instantiate(entities);
+    for (entity in created) if (entity.parent == null) entity.cell = cell;
+  }
+
+  function touchesCell(command : Command, cell : Int) {
+    if (Std.isOfType(command, CellCommand) && cast(command, CellCommand).touchesCell(cell)) return true;
+    return Lambda.exists(command.touched(), entity -> entity.scene != null && cellOf(entity.root) == cell);
+  }
+
+  // Kaydedilmemiş dosyalar, `res/` ile başlayan yollarla.
+  public function unsavedFiles() : Array<String> {
+    var files = [for (path in changedFiles().keys()) ROOT + path];
+    for (path in changedBinaries().keys()) files.push(ROOT + path);
+    files.sort(Reflect.compare);
+    return files;
+  }
+
+  public function editorText(path : String) : Null<String> {
+    return fileText(StringTools.startsWith(path, ROOT) ? path.substr(ROOT.length) : path);
+  }
+
+  // Editördeki hal, kaydedilecek metin olarak.
+  function fileText(path : String) : Null<String> {
+    var cell = cellOfPath(path);
+    if (StringTools.endsWith(path, WorldData.OBJECTS_SUFFIX)) return SceneFormat.write(scene.toDataWhere(root -> cellOf(root) == cell));
+    if (StringTools.endsWith(path, WorldData.TERRAIN_SUFFIX) && state.terrain.get(cell) != null) return state.terrain.get(cell).write();
+    if (StringTools.endsWith(path, WorldData.SCATTER_SUFFIX) && state.scatter.get(cell) != null) return state.scatter.get(cell).write();
+    if (path == data.environmentPath()) return state.environment.write();
+    if (path == manifestPath) return data.write();
+    return disk.get(path);
+  }
+
+  // Kaydedilmemiş değişiklik yok mu. Nesne dosyası içerikten, diğerleri değişiklik işaretinden bilinir.
+  function isClean(path : String) {
+    var cell = cellOfPath(path);
+    if (StringTools.endsWith(path, WorldData.OBJECTS_SUFFIX)) {
+      var base = disk.get(path), mine = fileText(path);
+      if (base == null) return scene.toDataWhere(root -> cellOf(root) == cell).entities.length == 0;
+      return mine == (try SceneFormat.write(SceneFormat.read(base)) catch (e : Dynamic) base);
+    }
+    if (StringTools.endsWith(path, WorldData.TERRAIN_SUFFIX)) return !touchedTerrain.exists(cell);
+    if (StringTools.endsWith(path, WorldData.SCATTER_SUFFIX)) return !touchedScatter.exists(cell);
+    if (path == data.environmentPath()) return !touchedEnvironment;
+    if (path == manifestPath) return !touchedManifest;
+    return true;
+  }
+
+  function cellOfPath(path : String) : Int {
+    for (cell in [WorldData.GLOBAL].concat(data.cells()))
+      for (suffix in [WorldData.OBJECTS_SUFFIX, WorldData.TERRAIN_SUFFIX, WorldData.SCATTER_SUFFIX, WorldData.NAV_SUFFIX, WorldData.SURFACE_SUFFIX])
+        if (data.path(cell, suffix) == path) return cell;
+    return WorldData.OUTSIDE;
+  }
+
+  function binaryChanged(path : String, bytes : Null<haxe.io.Bytes>) {
+    var current = FileSystem.exists(ROOT + path) ? File.getBytes(ROOT + path) : null;
+    function same(a : Null<haxe.io.Bytes>, b : Null<haxe.io.Bytes>) return a == null ? b == null : b != null && a.compare(b) == 0;
+    return !same(current, binaryOnDisk(path)) && !same(current, bytes);
+  }
+
+  function writeBinary(path : String, bytes : Null<haxe.io.Bytes>) {
+    if (bytes == null) {
+      if (FileSystem.exists(ROOT + path)) FileSystem.deleteFile(ROOT + path);
+    } else File.saveBytes(ROOT + path, bytes);
+    diskBinary.set(path, bytes);
+  }
+
+  function resolveBinary(path : String, prefer : String) {
+    editor.diskGuard.removeConflict(ROOT + path);
+    var cell = cellOfPath(path);
+    if (prefer == ThreeWay.MINE) {
+      var surface = state.surfaces.get(cell);
+      writeBinary(path, surface == null ? null : surface.write());
+      return;
+    }
+    diskBinary.set(path, FileSystem.exists(ROOT + path) ? File.getBytes(ROOT + path) : null);
+    touchedTerrain.remove(cell);
+    state.loadTerrain(cell);
+    dirtyRevision = -1;
   }
 
   function readFile(path : String) : Null<String> {

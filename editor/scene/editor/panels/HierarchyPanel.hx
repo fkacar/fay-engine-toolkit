@@ -148,6 +148,7 @@ class HierarchyPanel {
     var actions = editor.actions;
     if (!editor.selection.has(entity)) editor.selection.set([entity]);
     if (ImGui.menuItem("Yeniden adlandır", "F2")) rename(entity);
+    if (ImGui.menuItem("Ajan için kopyala")) editor.copyForAgent(editor.selection.has(entity) ? editor.selection.items : [entity]);
     if (entity.prefab != null && ImGui.menuItem("Prefab'ı aç")) deferred.push(() -> actions.openPrefab(entity));
     if (entity.prefab == null && !entity.isPrefabPart && ImGui.menuItem("Prefab yap")) editor.askPrefabName();
     if (ImGui.menuItem("Alt nesne ekle")) deferred.push(() -> actions.createEmpty(entity));

@@ -1,6 +1,8 @@
 package scene.editor;
 
 import scene.data.DataTable;
+import scene.data.ThreeWay;
+import scene.editor.commands.SetTableCommand;
 import sys.FileSystem;
 import sys.io.File;
 
@@ -11,9 +13,15 @@ class DataStore {
   public var tables(default, null) = new Map<String, DataTable>();
 
   var disk = new Map<String, String>();
+  var editor : Null<Editor>;
 
   public function new() {
     reload();
+  }
+
+  public function attach(editor : Editor) {
+    this.editor = editor;
+    for (name => text in disk) editor.diskGuard.observe(pathOf(name), text);
   }
 
   // Kaydedilmeden bırakılan değişiklikler atılır.
@@ -26,6 +34,7 @@ class DataStore {
       var name = file.substr(0, file.length - DataTable.SUFFIX.length);
       var text = File.getContent('$DIRECTORY/$file');
       disk.set(name, text);
+      if (editor != null) editor.diskGuard.observe(pathOf(name), text);
       try tables.set(name, DataTable.read(name, text)) catch (e : Dynamic) {}
     }
   }
@@ -56,20 +65,56 @@ class DataStore {
     return Lambda.count(changed()) > 0;
   }
 
+  // Dışarıda değişen tablo kör yazılmaz: satır satır birleşir, çakışırsa kaydedilmez.
   public function save() {
-    var files = changed();
-    if (Lambda.count(files) > 0 && !FileSystem.exists(DIRECTORY)) FileSystem.createDirectory(DIRECTORY);
-    for (name => text in files) {
-      var path = '$DIRECTORY/$name${DataTable.SUFFIX}';
-      if (text == null) {
-        if (FileSystem.exists(path)) FileSystem.deleteFile(path);
-        disk.remove(name);
-      } else {
-        File.saveContent(path, text);
-        disk.set(name, text);
-      }
-    }
-    return Lambda.count(files);
+    if (Lambda.count(changed()) > 0 && !FileSystem.exists(DIRECTORY)) FileSystem.createDirectory(DIRECTORY);
+    return StoreGuard.save(editor, access(), changed());
+  }
+
+  public function unsavedFiles() : Array<String> {
+    var access = access();
+    return [for (name in access.names()) if (access.mine(name) != access.base(name)) access.path(name)];
+  }
+
+  public function editorText(path : String) : Null<String> {
+    var access = access();
+    for (name in access.names()) if (access.path(name) == path) return access.mine(name);
+    return null;
+  }
+
+  public function checkDisk() : Array<String> {
+    return StoreGuard.check(editor, access());
+  }
+
+  function pathOf(name : String) {
+    return '$DIRECTORY/$name${DataTable.SUFFIX}';
+  }
+
+  function access() : StoreGuard.StoreAccess {
+    return {
+      path: pathOf,
+      names: () -> {
+        var found = [for (name in disk.keys()) name];
+        for (name in tables.keys()) if (found.indexOf(name) < 0) found.push(name);
+        if (FileSystem.exists(DIRECTORY))
+          for (file in FileSystem.readDirectory(DIRECTORY)) {
+            if (!StringTools.endsWith(file, DataTable.SUFFIX)) continue;
+            var name = file.substr(0, file.length - DataTable.SUFFIX.length);
+            if (found.indexOf(name) < 0) found.push(name);
+          }
+        found;
+      },
+      base: name -> disk.get(name),
+      setBase: (name, text) -> {
+        if (text == null) disk.remove(name);
+        else disk.set(name, text);
+      },
+      mine: text,
+      apply: apply,
+      forget: name -> editor.commands.forget(command -> Std.isOfType(command, SetTableCommand) && cast(command, SetTableCommand).name == name),
+      merge: (name, base, mine, theirs, prefer) -> ThreeWay.table(name, base, mine, theirs, prefer),
+      canonical: (name, text) -> try DataTable.read(name, text).write() catch (e : Dynamic) text,
+    };
   }
 
   function changed() : Map<String, Null<String>> {

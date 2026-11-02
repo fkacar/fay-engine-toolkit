@@ -6,7 +6,7 @@ class SetDialogCommand implements Command {
   public var label(default, null) : String;
 
   var store : DialogStore;
-  var id : String;
+  public var id(default, null) : String;
   var before : Null<String>;
   var after : Null<String>;
 

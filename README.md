@@ -68,7 +68,7 @@ Tablo ve diyalog alanları:
 
 Tabloda olmayan satır veya olmayan diyalog derleme uyarısı verir ama derlemeyi durdurmaz, editörde Uyarılar panelinde görünür. Bunlar kod değil içeriktir: bir tasarımcının silmesi veya iki kişinin birleştirmesi ekibin editörünü açılmaz hale getirmemelidir. Veri paneli kullanılan satırın silinmesini ve kimliğinin değişmesini engeller (`scene.editor.DataUsage`). Kod tarafındaki uyuşmazlıklar, yani bileşen, alan ve `@:choice` seçenekleri, derlemeyi durdurmaya devam eder.
 
-Bileşen `title()` ile Türkçe adını, `category()` ile "Bileşen ekle" grubunu, `issues()` ile Uyarılar paneline düşecek kendi kurallarını verir. `addable()` grup adları döndürürse Inspector bileşenin altında "+ Grup" düğmeleri gösterir; tetikleyici `[TriggerCondition.CATEGORY, TriggerAction.CATEGORY]` döndürür.
+Bileşen `storyLinks()` ile görev bağlantılarını bildirir (`scene.story.StoryLink`): bekler veya yayar (olay), okur veya ayarlar (değişken), ister, verir veya alır (eşya), başlatır (diyalog). Uyarılar ve ajanın `explain_quest` aracı bunları eşleştirir. Bileşen `title()` ile Türkçe adını, `category()` ile "Bileşen ekle" grubunu, `issues()` ile Uyarılar paneline düşecek kendi kurallarını verir. `addable()` grup adları döndürürse Inspector bileşenin altında "+ Grup" düğmeleri gösterir; tetikleyici `[TriggerCondition.CATEGORY, TriggerAction.CATEGORY]` döndürür.
 
 `@:choice` alanı `String` olmalı ve varsayılanı seçeneklerden biri olmalıdır. Seçenek koddan çıkarılınca o değeri kullanan sahne, prefab veya prefab farkı derlemeyi durdurur.
 
@@ -166,6 +166,21 @@ Yol bulma `NavWorld.findPath` ile yapılır. Hücre başına düğüm ızgarası
 - Oyun `editor.dialogs.itemTable` ile eşya tablosunu söylerse koşul düğümünde eşya listeden seçilir ve satır silinirken diyaloglar da taranır.
 
 Oyun verisi `scene.data.DataTable` ve `GameData` ile okunur. Her tablo `res/data/<ad>.table.json` dosyasıdır.
+
+## Dosya güvenliği
+
+Editör dosyayı hiç kör yazmaz (`DiskGuard`, `StoreGuard`):
+- Kaydetmeden önce diski yeniden okur. Dosya dışarıda değiştiyse `scene.data.ThreeWay` ile üç yönlü birleştirir: sahnede nesne, tabloda satır, diyalogda düğüm düzeyinde.
+- Aynı birim iki tarafta da farklı değiştiyse dosyayı yazmaz. İki hali `.editor/catismalar/` altına yedekler, Uyarılar panelinde seçtirir.
+- Açık dosyaları saniyede bir yoklar. Temiz olanı yeniden yükler ve o dosyanın geri alma adımlarını `CommandStack.forget` ile düşürür.
+
+Yeni bir dosya türü yazan kod bu yoldan geçmelidir.
+
+## Ajan sunucusu
+
+`scene.editor.agent.AgentServer`, editör açılınca `127.0.0.1:8890`'da MCP (HTTP) sunucusu açar. Soket her karede yoklanır, araçlar ana döngüde çalışır. Bir araçtaki hata editörü düşürmez, ajana hata olarak döner. `Origin` başlıklı ve başka `Host`'lu istekler reddedilir.
+
+`ContextTools` salt okunur bağlam araçlarını ve istemleri (`addPrompt`) kaydeder. Ekran görüntüsü için oyunun `Main.render`'ı `super.render(e)`'den sonra `editor.afterRender(e)` çağırmalıdır, şablon bunu yapar. Oyun kendi aracını `editor.agent.add({name, description, schema, readOnly, run})` ile ekler. `run` bir nesne döndürür: `{value}` JSON olarak, `{text}` düz metin olarak, `{png}` görüntü olarak gider. Projenin `.mcp.json`'u ve `.claude/settings.json`'u şablonda `mcp.json` ve `claude-settings.json` adlarıyla durur, `new-project.sh` yerine koyar. `settings.json`'daki `PostToolUse` hook'u, ajan dosya yazınca `file_status` aracını çağırır.
 
 ## Prefab
 

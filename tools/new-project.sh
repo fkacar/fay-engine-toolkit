@@ -23,6 +23,9 @@ cp -R "$TOOLKIT/template/." "$TARGET/"
 mv "$TARGET/gitignore.txt" "$TARGET/.gitignore"
 mv "$TARGET/gitattributes.txt" "$TARGET/.gitattributes"
 mv "$TARGET/editorconfig.txt" "$TARGET/.editorconfig"
+mv "$TARGET/mcp.json" "$TARGET/.mcp.json"
+mkdir -p "$TARGET/.claude"
+mv "$TARGET/claude-settings.json" "$TARGET/.claude/settings.json"
 mv "$TARGET/vscode" "$TARGET/.vscode"
 
 git -C "$TARGET" init -q

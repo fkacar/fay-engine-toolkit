@@ -7,6 +7,10 @@ import imgui.types.ImFontAtlas.ImFontTexData;
 import scene.FocusGuard;
 import scene.HiDpi;
 import scene.Marker;
+import scene.Entity;
+import scene.data.ThreeWay;
+import scene.editor.agent.AgentServer;
+import scene.editor.agent.ContextTools;
 import scene.nav.NavWorld;
 import scene.story.Dialog;
 import scene.world.WorldData;
@@ -65,6 +69,7 @@ class Editor {
   public var viewport(default, null) : Viewport;
   public var hierarchy(default, null) : HierarchyPanel;
   public var importer(default, null) = new AssetImporter();
+  public var diskGuard(default, null) = new DiskGuard();
   public var data(default, null) = new DataStore();
   public var dialogs(default, null) = new DialogStore();
   public var previews(default, null) = new ModelPreview();
@@ -74,6 +79,10 @@ class Editor {
   public var centerX(default, null) = 0.;
   public var centerY(default, null) = 0.;
   public var dialogWorkspace(default, null) : DialogWorkspace;
+  // Dış ajanların (Claude Code gibi) bağlandığı MCP sunucusu. Editör açılınca kendiliğinden başlar.
+  public var agent(default, null) : AgentServer;
+  var captureWaiters : Array<hxd.Pixels->Void> = [];
+  var labelFrames = 0;
   var centerWidth = 0.;
   var centerHeight = 0.;
   // Asset Browser'dan sürüklenen dosya, `res` köküne göre.
@@ -121,6 +130,7 @@ class Editor {
     validator.refExists = data.exists;
     validator.dialogExists = dialogs.exists;
     validator.rules.push(_ -> dialogIssues());
+    validator.rules.push(_ -> storyIssues());
     if (world != null) scene.provide(NavWorld, new NavWorld(world));
     document = new SceneDocument(this, scene, path, world);
     validator.rules.push(_ -> document.prefabRootIssues());
@@ -133,6 +143,8 @@ class Editor {
     assets = new AssetBrowser(this);
     worldPanel = new WorldPanel(this);
     dataPanel = new DataPanel(this);
+    data.attach(this);
+    dialogs.attach(this);
     dialogWorkspace = new DialogWorkspace(this);
     dialogPanel = new DialogPanel(this);
     if (WorldData.isWorldFile(path)) document.open(path);
@@ -146,6 +158,10 @@ class Editor {
     addPanel(WORLD, worldPanel.draw);
     addPanel(DATA, dataPanel.draw);
     addPanel(DIALOGS, dialogPanel.draw);
+
+    agent = new AgentServer(AgentServer.PORT, ContextTools.INSTRUCTIONS);
+    new ContextTools(this, agent);
+    ContextTools.prompts(agent);
   }
 
   public function addPanel(title : String, draw : Void->Void) {
@@ -159,6 +175,7 @@ class Editor {
     var failure = session.poll();
     if (failure != null) report(failure);
 
+    agent.update(dt);
     readShortcuts();
     keyboardPanelFocused = false;
     drawMenu();
@@ -168,6 +185,7 @@ class Editor {
       ImGui.end();
     }
     dialogWorkspace.draw();
+    drawLabels();
     if (showAssets) {
       ImGui.setWindowFocus(ASSETS);
       ImGui.setWindowFocus(INSPECTOR);
@@ -305,6 +323,16 @@ class Editor {
     if (Key.isPressed(Key.NUMBER_3)) viewport.gizmo.tool = Scale;
   }
 
+  // Yanlış yazılmış olay ve değişken adları oyunda sessizce hiçbir şey yapmaz.
+  function storyIssues() : Array<Validator.Issue> {
+    return [for (found in StoryIndex.issues(StoryIndex.build(this))) {
+      entity: found.entry.entity == null || found.entry.loaded != true ? null : scene.find(found.entry.entity),
+      message: found.message,
+      dialog: found.entry.dialog,
+      node: found.entry.node,
+    }];
+  }
+
   // Diyaloglarda boş bırakılan alanlar oyunda sessizce hiçbir şey yapmaz.
   function dialogIssues() : Array<Validator.Issue> {
     var issues : Array<Validator.Issue> = [];
@@ -327,6 +355,56 @@ class Editor {
   // Önceki karenin değeridir; paneller çizilmeden önce sıfırlanır, gizli panel kilitlemez.
   function isPanelFocused() {
     return keyboardPanelFocused;
+  }
+
+  // Claude Code'a yapıştırılacak kısa başvuru: ajan nesneyi kimliğiyle bulur.
+  public function copyForAgent(entities : Array<Entity>) {
+    if (entities.length == 0) return;
+    var text = [for (entity in entities) 'yoa-editor nesnesi "${entity.name}" (kimlik ${entity.id})'].join("\n");
+    ImGui.setClipboardText(text);
+    show(entities.length == 1 ? 'Ajan için kopyalandı: ${entities[0].name}' : 'Ajan için kopyalandı: ${entities.length} nesne');
+  }
+
+  // Ajan için ekran görüntüsü: çizim bittikten sonra okunur. İstenirse önce nesne adları yazılır.
+  public function requestCapture(labels : Bool, done : hxd.Pixels->Void) {
+    captureWaiters.push(done);
+    if (labels) labelFrames = 2;
+  }
+
+  // Oyunun App'i super.render'dan sonra çağırır: arka tampon panellerle birlikte tamamdır.
+  public function afterRender(engine : h3d.Engine) {
+    if (captureWaiters.length == 0 || labelFrames > 1) return;
+    var pixels = hxd.Pixels.alloc(engine.width, engine.height, RGBA);
+    #if hlsdl
+    sdl.GL.readPixels(0, 0, engine.width, engine.height, 0x1908, 0x1401, (pixels.bytes : hl.Bytes));
+    #end
+    for (i in 0...engine.width * engine.height) pixels.bytes.set(i * 4 + 3, 255);
+    pixels.flipY();
+    var waiters = captureWaiters;
+    captureWaiters = [];
+    labelFrames = 0;
+    for (done in waiters) done(pixels);
+  }
+
+  function drawLabels() {
+    if (labelFrames == 0) return;
+    labelFrames--;
+    var list = ImGui.getForegroundDrawList();
+    var camera = viewport.view;
+    var engine = h3d.Engine.getCurrent();
+    var area = centerArea();
+    for (entity in scene.entities) {
+      var isMarker = Lambda.exists(entity.components, component -> Std.isOfType(component, Marker));
+      if (entity.parent != null && !selection.has(entity) && !isMarker || !entity.isShown()) continue;
+      var at = entity.object.getAbsPos();
+      var forward = camera.target.sub(camera.pos);
+      if ((at.tx - camera.pos.x) * forward.x + (at.ty - camera.pos.y) * forward.y + (at.tz - camera.pos.z) * forward.z <= 0) continue;
+      var screen = camera.project(at.tx, at.ty, at.tz, engine.width, engine.height);
+      if (screen.x < area.x || screen.x > area.x + area.width || screen.y < area.y || screen.y > area.y + area.height) continue;
+      var size = ImGui.calcTextSize(entity.name);
+      list.addRectFilled({x: screen.x - 2, y: screen.y - 2}, {x: screen.x + size.x + 2, y: screen.y + size.y + 2}, 0xC0000000);
+      list.addText({x: screen.x, y: screen.y}, selection.has(entity) ? 0xFF40D0FF : 0xFFFFFFFF, entity.name);
+    }
   }
 
   // Ortadaki sahne alanı: diyalog düzenleyici burayı kaplar.
@@ -574,6 +652,7 @@ class Editor {
   }
 
   function drawWarnings() {
+    drawFileConflicts();
     if (document.warningCount() == 0 && messages.length == 0) ImGui.textDisabled("Uyarı yok");
     for (i in 0...document.issues.length) {
       var issue = document.issues[i];
@@ -586,6 +665,21 @@ class Editor {
     for (warning in scene.warnings) ImGui.textWrapped(warning);
     for (message in messages) ImGui.textWrapped(message);
     if (messages.length > 0 && ImGui.smallButton("Temizle")) messages = [];
+  }
+
+  // Dışarıda da değişen dosyalar: çakışmayan değişiklikler iki taraftan da kalır, çakışanda seçilen taraf.
+  function drawFileConflicts() {
+    for (conflict in diskGuard.conflicts.copy()) {
+      ImGui.pushID(conflict.path);
+      ImGui.textColored(ERROR_COLOR, '${conflict.path} kaydedilmedi: dışarıda da değişti. Çakışan: ${conflict.units.join(", ")}');
+      if (ImGui.smallButton("Çakışanlarda benimki")) conflict.resolve(ThreeWay.MINE);
+      ImGui.sameLine();
+      if (ImGui.smallButton("Çakışanlarda diskteki")) conflict.resolve(ThreeWay.THEIRS);
+      ImGui.sameLine();
+      ImGui.textDisabled('İki hal de ${DiskGuard.BACKUP_DIRECTORY} altında yedeklendi');
+      ImGui.popID();
+    }
+    for (path in diskGuard.pending.keys()) ImGui.textWrapped('$path dışarıda değişti, kaydedilmemiş değişikliğin var: kaydedince birleştirilecek');
   }
 
   // ImGui kırpmayı ham pikselle yapar, bu yüzden 2D sahneler gibi yakınlaştırılamaz: font ve boşluklar büyür.

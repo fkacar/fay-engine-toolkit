@@ -1762,6 +1762,58 @@ class TestMain {
     return dialog;
   }
 
+  // Editör açıkken dışarıda değişen dosya: birimler ayrı ayrı birleşir, aynı birim çakışır.
+  static function testThreeWay() {
+    var merge = scene.data.ThreeWay;
+    function sceneOf(names : Array<String>) {
+      var data = new SceneData(SceneFormat.VERSION);
+      for (name in names) {
+        var parts = name.split("=");
+        data.entities.push(new scene.data.SceneData.EntityData(parts[0], parts[1]));
+      }
+      return SceneFormat.write(data);
+    }
+    function names(text : Null<String>) {
+      return text == null ? "çakışma" : [for (entity in SceneFormat.read(text).entities) '${entity.id}=${entity.name}'].join(",");
+    }
+    var base = sceneOf(["a=Ev", "b=Kuyu"]);
+    var result = merge.scene(base, sceneOf(["a=Büyük ev", "b=Kuyu"]), sceneOf(["a=Ev", "b=Eski kuyu", "c=Devriye"]));
+    equals(names(result.text), "a=Büyük ev,b=Eski kuyu,c=Devriye", "iki tarafın farklı nesneleri birleşmeli");
+    equals(result.conflicts.length, 0, "farklı nesnelerde çakışma yok");
+    result = merge.scene(base, sceneOf(["a=Benim ev", "b=Kuyu"]), sceneOf(["a=Onun ev", "b=Kuyu"]));
+    check(result.text == null && result.conflicts[0] == "Benim ev", 'aynı nesne çakışmalı: ${result.conflicts}');
+    equals(names(merge.scene(base, sceneOf(["a=Benim ev", "b=Kuyu"]), sceneOf(["a=Onun ev", "b=Kuyu"]), merge.MINE).text), "a=Benim ev,b=Kuyu", "çakışmada benimki");
+    equals(names(merge.scene(base, sceneOf(["a=Benim ev", "b=Kuyu"]), sceneOf(["a=Onun ev", "b=Kuyu"]), merge.THEIRS).text), "a=Onun ev,b=Kuyu", "çakışmada diskteki");
+    result = merge.scene(base, sceneOf(["b=Kuyu"]), sceneOf(["a=Onun ev", "b=Kuyu"]));
+    check(result.text == null, "biri silip öbürü değiştirince çakışmalı");
+    equals(names(merge.scene(base, sceneOf(["b=Kuyu"]), base).text), "b=Kuyu", "yalnızca benim silmem kalmalı");
+    equals(names(merge.scene(base, base, sceneOf(["b=Kuyu"])).text), "b=Kuyu", "yalnızca diskteki silme kalmalı");
+    equals(names(merge.scene(null, sceneOf(["a=Ev"]), sceneOf(["b=Kuyu"])).text), "b=Kuyu,a=Ev", "tabansız yeni dosyada iki taraf da kalır");
+
+    var table = '{"version":1,"title":"Eşyalar","columns":[{"name":"ad","title":"Ad","type":"metin"}],"rows":[{"id":"kilic","ad":"Kılıç"}]}';
+    var mineTable = '{"version":1,"title":"Eşyalar","columns":[{"name":"ad","title":"Ad","type":"metin"}],"rows":[{"id":"kilic","ad":"Uzun kılıç"}]}';
+    var theirTable = '{"version":1,"title":"Eşyalar","columns":[{"name":"ad","title":"Ad","type":"metin"},{"name":"deger","title":"Değer","type":"tam"}],"rows":[{"id":"kilic","ad":"Kılıç"},{"id":"su","ad":"Su","deger":3}]}';
+    var merged = DataTable.read("esyalar", merge.table("esyalar", table, mineTable, theirTable).text);
+    equals(merged.columns.length, 2, "diskte eklenen sütun kalmalı");
+    equals(merged.find("kilic").get("ad"), "Uzun kılıç", "benim satır değişikliğim kalmalı");
+    check(merged.find("su") != null, "diskte eklenen satır kalmalı");
+
+    var dialog = scene.story.Dialog.create("muhtar", "Muhtar");
+    var mineDialog = dialog.clone();
+    mineDialog.node(2).text = "Merhaba";
+    var theirDialog = dialog.clone();
+    theirDialog.nodes.push({id: 4, type: scene.story.Dialog.EVENT, x: 0, y: 0, event: "selam", next: 3});
+    var joined = scene.story.Dialog.read("muhtar", merge.dialog("muhtar", dialog.write(), mineDialog.write(), theirDialog.write()).text);
+    check(joined.node(2).text == "Merhaba" && joined.node(4) != null, "diyalogda iki tarafın düğümleri birleşmeli");
+    var otherText = dialog.clone();
+    otherText.node(2).text = "Selam";
+    check(merge.dialog("muhtar", dialog.write(), mineDialog.write(), otherText.write()).text == null, "aynı düğüm çakışmalı");
+
+    equals(merge.whole("x", "x", "y").text, "y", "değiştirmediğim dosyada diskteki");
+    check(merge.whole("x", "z", "y").text == null, "iki taraf da değiştirdiyse bütün dosya çakışır");
+    equals(merge.whole("x", null, "x").text, null, "yalnızca ben sildiysem silinir");
+  }
+
   // Yerleşim veriden hesaplanır: konumlar ekran netliğine ve önceki konumlara bağlı değildir.
   static function testDialogLayout() {
     var dialog = questDialog();
@@ -1969,6 +2021,7 @@ class TestMain {
     testDataTables();
     testStory();
     testDialogLayout();
+    testThreeWay();
     testEnvironment();
     testPrefabFailures();
     testPrefabSchema();

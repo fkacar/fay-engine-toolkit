@@ -24,8 +24,8 @@ class EditorCamera {
 
   var camera : h3d.Camera;
   var position : Vec3;
-  var yaw : Float;
-  var pitch : Float;
+  public var yaw(default, null) : Float;
+  public var pitch(default, null) : Float;
   var goal : Null<Vec3>;
 
   public function new(camera : h3d.Camera) {

@@ -7,3 +7,5 @@ Thumbs.db
 imgui.ini
 .editor/
 NodeEditor.json
+# Claude Code kişisel ayarları
+.claude/settings.local.json
