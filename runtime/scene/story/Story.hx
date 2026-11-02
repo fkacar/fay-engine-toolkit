@@ -8,6 +8,8 @@ class Story {
   public var state(default, null) = new GameState();
   public var dialog(default, null) : Null<DialogRunner>;
   public var messages(default, null) : Array<String> = [];
+  // Verilirse her adım kaydedilir: editörden açılan oyun ve görev testi kullanır.
+  public var log(default, set) : Null<StoryLog>;
 
   var read : String->Null<String>;
   var listeners = new Map<String, Array<Entity>>();
@@ -28,6 +30,7 @@ class Story {
 
   public function emit(event : String) {
     var list = listeners.get(event);
+    if (log != null) log.add("olay", {name: event, listeners: list == null ? [] : [for (entity in list) entity.name]});
     if (list != null) for (entity in list.copy()) fire(entity);
   }
 
@@ -35,8 +38,12 @@ class Story {
   public function fire(entity : Entity) : Bool {
     for (component in entity.components) {
       var condition = Std.downcast(component, TriggerCondition);
-      if (condition != null && !condition.passes(this)) return false;
+      if (condition != null && !condition.passes(this)) {
+        if (log != null) log.add("kosul_tutmadi", {trigger: entity.name, id: entity.id, condition: condition.title(), fields: StoryLog.fields(condition)});
+        return false;
+      }
     }
+    if (log != null) log.add("tetikleyici", {trigger: entity.name, id: entity.id, actions: [for (component in entity.components) if (Std.isOfType(component, TriggerAction)) component.title()]});
     for (component in entity.components) {
       var action = Std.downcast(component, TriggerAction);
       if (action != null) action.run(this);
@@ -46,6 +53,7 @@ class Story {
 
   public function startDialog(id : String) {
     var data = load(id);
+    if (log != null) log.add("diyalog", {dialog: id, found: data != null});
     if (data == null) {
       show('Diyalog bulunamadı: $id');
       return;
@@ -60,6 +68,7 @@ class Story {
 
   public function show(message : String) {
     messages.push(message);
+    if (log != null) log.add("mesaj", {text: message});
   }
 
   public function load(id : String) : Null<Dialog> {
@@ -68,5 +77,10 @@ class Story {
       dialogs.set(id, text == null ? null : Dialog.read(id, text));
     }
     return dialogs.get(id);
+  }
+
+  function set_log(value : Null<StoryLog>) {
+    state.onChange = value == null ? null : (kind, name, amount) -> value.add(kind, {name: name, value: amount});
+    return log = value;
   }
 }

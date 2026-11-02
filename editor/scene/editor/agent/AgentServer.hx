@@ -24,6 +24,7 @@ typedef AgentReply = {
   var ?text : String;
   var ?png : Bytes;
   var ?wait : Void->Null<AgentReply>;   // birkaç karede biten iş: hazır olunca yanıt döner
+  var ?timeout : Float;                  // saniye, varsayılan 10
 }
 
 private class Client {
@@ -49,7 +50,7 @@ class AgentServer {
   static inline var RETRY_SECONDS = 2.;
   static var VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26"];
   static inline var DEFERRED = "\u0000bekliyor";
-  static inline var WAIT_FRAMES = 600;
+  static inline var WAIT_SECONDS = 10.;
 
   public var error(default, null) : Null<String>;
   public var calls(default, null) = 0;
@@ -64,7 +65,7 @@ class AgentServer {
   var instructions : String;
   var retry = 0.;
   var buffer = Bytes.alloc(64 * 1024);
-  var waiting : Array<{id : Dynamic, wait : Void->Null<AgentReply>, client : Null<Client>, frames : Int}> = [];
+  var waiting : Array<{id : Dynamic, wait : Void->Null<AgentReply>, client : Null<Client>, deadline : Float}> = [];
 
   public function new(port : Int, instructions : String) {
     this.port = port;
@@ -99,9 +100,8 @@ class AgentServer {
     }
     accept();
     for (job in waiting.copy()) {
-      job.frames++;
       var result = try job.wait() catch (e : Dynamic) ({text: 'çalışmadı: $e'} : AgentReply);
-      if (result == null && job.frames < WAIT_FRAMES) continue;
+      if (result == null && haxe.Timer.stamp() < job.deadline) continue;
       if (result == null) result = {text: "zaman aşımı"};
       waiting.remove(job);
       if (job.client != null) respond(job.client, 200, "application/json", reply(job.id, content(result)));
@@ -247,7 +247,7 @@ class AgentServer {
       case "tools/call":
         var result = call(params.name, params.arguments == null ? {} : params.arguments);
         if (result != null && result.wait != null) {
-          waiting.push({id: id, wait: result.wait, client: null, frames: 0});
+          waiting.push({id: id, wait: result.wait, client: null, deadline: haxe.Timer.stamp() + (result.timeout != null ? result.timeout : WAIT_SECONDS)});
           DEFERRED;
         } else reply(id, result);
       case "prompts/list": reply(id, {prompts: [for (prompt in prompts) {name: prompt.name, description: prompt.description, arguments: prompt.arguments}]});

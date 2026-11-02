@@ -8,9 +8,12 @@ import scene.FocusGuard;
 import scene.HiDpi;
 import scene.Marker;
 import scene.Entity;
+import scene.PlayFiles;
 import scene.data.ThreeWay;
 import scene.editor.agent.AgentServer;
 import scene.editor.agent.ContextTools;
+import scene.editor.agent.PlayTools;
+import scene.editor.agent.EditTools;
 import scene.nav.NavWorld;
 import scene.story.Dialog;
 import scene.world.WorldData;
@@ -95,6 +98,12 @@ class Editor {
   var dialogPanel : DialogPanel;
   var keyboardPanelFocused = false;
   var session = new PlaySession();
+  // Tasarımcının menüden başlattığı görev testi: sonucu gelince Uyarılar paneline yazılır.
+  var designerTest : Null<String>;
+  // Claude Code hook'u okur: editör açık mı, hangi dosyalar kaydedilmemiş. Eskiyse editör kapalı sayılır.
+  static inline var STATUS_FILE = ".editor/ajan-durum.json";
+  static inline var STATUS_SECONDS = 2.;
+  var statusTimer = STATUS_SECONDS;
   var panels : Array<Panel> = [];
   var messages : Array<String> = [];
   var notice = "";
@@ -161,6 +170,8 @@ class Editor {
 
     agent = new AgentServer(AgentServer.PORT, ContextTools.INSTRUCTIONS);
     new ContextTools(this, agent);
+    new PlayTools(this, agent);
+    new EditTools(this, agent);
     ContextTools.prompts(agent);
   }
 
@@ -176,6 +187,8 @@ class Editor {
     if (failure != null) report(failure);
 
     agent.update(dt);
+    pollDesignerTest();
+    writeStatus(dt);
     readShortcuts();
     keyboardPanelFocused = false;
     drawMenu();
@@ -276,6 +289,63 @@ class Editor {
   function assetExists(path : String) {
     AssetImporter.forgetMissingFiles();
     return hxd.Res.loader.exists(path);
+  }
+
+  function writeStatus(dt : Float) {
+    statusTimer += dt;
+    if (statusTimer < STATUS_SECONDS) return;
+    statusTimer = 0;
+    try {
+      if (!FileSystem.exists(".editor")) FileSystem.createDirectory(".editor");
+      var status = {zaman: Math.floor(Date.now().getTime() / 1000), port: AgentServer.PORT, sunucu: agent.isListening(), kaydedilmemis: document.unsavedFiles()};
+      sys.io.File.saveContent(STATUS_FILE, haxe.Json.stringify(status, null, " "));
+    } catch (e : Dynamic) {}
+  }
+
+  public function isPlaying() {
+    return session.isRunning;
+  }
+
+  // Görev testi ayrı oyun sürecinde oynar: dünya kayıtlı haliyle açılır, kamera verilmez.
+  // Kaydedilmemiş değişiklikler teste girmez; save true ise önce kaydedilir.
+  public function startPlayTest(test : Dynamic, save : Bool) : Null<String> {
+    if (session.isRunning) return "Oyun zaten açık: kapanmasını bekle";
+    if (save && commands.isDirty && !document.save()) return "Kaydedilemedi";
+    PlayTests.prepare(test);
+    session.start(new PlayOptions(document.resourcePath()));
+    return null;
+  }
+
+  function runDesignerTest(name : String) {
+    var test = PlayTests.load(name);
+    if (test == null) {
+      show('Görev testi okunamadı: $name', true);
+      return;
+    }
+    var problem = startPlayTest(test, true);
+    if (problem != null) show(problem, true);
+    else {
+      designerTest = name;
+      show('Görev testi oynuyor: $name');
+    }
+  }
+
+  function pollDesignerTest() {
+    if (designerTest == null) return;
+    var result = PlayTests.result();
+    if (result == null) {
+      if (!session.isRunning) {
+        messages.push('Görev testi $designerTest: oyun sonuç yazmadan kapandı');
+        designerTest = null;
+      }
+      return;
+    }
+    var passed = result.passed == true;
+    messages.push('Görev testi $designerTest: ${passed ? "geçti" : "kaldı"}');
+    var failures : Array<String> = result.failures == null ? [] : result.failures;
+    for (failure in failures) messages.push('  $failure');
+    show(passed ? 'Görev testi geçti: $designerTest' : 'Görev testi kaldı: $designerTest. Uyarılar paneline bak', !passed);
+    designerTest = null;
   }
 
   function play() {
@@ -477,6 +547,12 @@ class Editor {
     }
     if (ImGui.beginMenu("Oyun")) {
       if (ImGui.menuItem("Buradan oyna", "F5", false, !session.isRunning)) play();
+      if (ImGui.beginMenu("Görev testleri")) {
+        var tests = PlayTests.list();
+        if (tests.length == 0) ImGui.textDisabled('Test yok: ${PlayFiles.TESTS} altına .test.json yaz');
+        for (name in tests) if (ImGui.menuItem(name, null, false, !session.isRunning)) runDesignerTest(name);
+        ImGui.endMenu();
+      }
       ImGui.endMenu();
     }
     if (ImGui.beginMenu("Yardım")) {

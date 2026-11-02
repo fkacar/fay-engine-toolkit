@@ -278,7 +278,7 @@ class SceneActions {
     add([waypointData(route.entity.id, x, y)], "Rota noktası ekle");
   }
 
-  function waypointData(parent : String, x : Float, y : Float) {
+  public function waypointData(parent : String, x : Float, y : Float) {
     var item = new EntityData(Guid.make(), "Nokta");
     item.parent = parent;
     item.position = [x, y, 0];

@@ -5,13 +5,8 @@
         "matcher": "Write|Edit|MultiEdit",
         "hooks": [
           {
-            "type": "mcp_tool",
-            "server": "sahne-editoru",
-            "tool": "file_status",
-            "input": {
-              "file_path": "${tool_input.file_path}",
-              "hook": true
-            }
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/libs/scene-toolkit/tools/agent-hook.sh\""
           }
         ]
       }

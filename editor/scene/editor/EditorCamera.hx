@@ -130,6 +130,21 @@ class EditorCamera {
     speed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, speed * Math.pow(SPEED_STEP, wheel)));
   }
 
+  // Orbit noktası: kameranın etrafında döndüğü, bakılan nokta.
+  public function lookPoint() : Vec3 {
+    return position.add(forward().scale(distance));
+  }
+
+  // Ajan için: bakılan nokta, uzaklık ve açılarla yerleştirir. Tam dik bakış yönü belirsizleştirir,
+  // bu yüzden eğim sınırda kalır.
+  public function place(target : Vec3, distance : Float, yaw : Float, pitch : Float) {
+    goal = null;
+    this.distance = Math.max(distance, MIN_DISTANCE);
+    this.yaw = yaw;
+    this.pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, pitch));
+    position = target.sub(forward().scale(this.distance));
+  }
+
   public function setDistance(value : Float) {
     distance = Math.max(value, MIN_DISTANCE);
   }

@@ -37,6 +37,11 @@ class CommandStack {
 
   public function execute(command : Command) {
     command.execute();
+    record(command);
+  }
+
+  // Önceden uygulanmış değişikliği geçmişe yazar: ajanın toplu işi adım adım uygulanır, tek adım kaydedilir.
+  public function record(command : Command) {
     done.push(command);
     undone = [];
     history = history.slice(0, done.length - 1);

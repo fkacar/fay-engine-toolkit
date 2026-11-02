@@ -7,6 +7,8 @@ class GameState {
   public var standing(default, null) = new Map<String, Int>();
   // Arayüz her değişiklikte kendini yeniler.
   public var revision(default, null) = 0;
+  // İz için: tür (esya, degisken, iliski), ad, yeni değer.
+  public var onChange : Null<String->String->Int->Void>;
 
   public function new() {}
 
@@ -19,6 +21,7 @@ class GameState {
     if (total <= 0) items.remove(item);
     else items.set(item, total);
     revision++;
+    if (onChange != null) onChange("esya", item, count(item));
   }
 
   public function flag(name : String) {
@@ -28,6 +31,7 @@ class GameState {
   public function setFlag(name : String, value : Int) {
     flags.set(name, value);
     revision++;
+    if (onChange != null) onChange("degisken", name, value);
   }
 
   public function standingWith(faction : String) {
@@ -37,5 +41,6 @@ class GameState {
   public function changeStanding(faction : String, amount : Int) {
     standing.set(faction, standingWith(faction) + amount);
     revision++;
+    if (onChange != null) onChange("iliski", faction, standingWith(faction));
   }
 }

@@ -10,6 +10,7 @@ class DialogRunner {
   public var text(default, null) = "";
   public var choices(default, null) : Array<String> = [];
   public var finished(default, null) = false;
+  public var id(get, never) : String;
 
   var dialog : Dialog;
   var story : Story;
@@ -29,6 +30,7 @@ class DialogRunner {
 
   public function choose(index : Int) {
     if (current == null || current.type != Dialog.CHOICES || index < 0 || index >= current.choices.length) return;
+    if (story.log != null) story.log.add("secim", {dialog: dialog.id, node: current.id, index: index + 1, text: current.choices[index].text});
     go(current.choices[index].next);
   }
 
@@ -45,9 +47,11 @@ class DialogRunner {
           speaker = current.speaker == null ? "" : current.speaker;
           text = current.text == null ? "" : current.text;
           choices = [];
+          if (story.log != null) story.log.add("satir", {dialog: dialog.id, node: current.id, speaker: speaker, text: text});
           return;
         case Dialog.CHOICES:
           choices = [for (choice in current.choices) choice.text];
+          if (story.log != null) story.log.add("secenekler", {dialog: dialog.id, node: current.id, choices: choices});
           return;
         case Dialog.CONDITION:
           var value = current.kind == Dialog.ITEM ? story.state.count(current.name) : story.state.flag(current.name);
@@ -63,5 +67,10 @@ class DialogRunner {
       }
     }
     finished = true;
+    if (story.log != null) story.log.add("diyalog_bitti", {dialog: dialog.id});
+  }
+
+  function get_id() {
+    return dialog.id;
   }
 }
