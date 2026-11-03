@@ -22,7 +22,9 @@ class DataTable {
   public static inline var CHOICE = "secim";
   public static inline var REFERENCE = "baglanti";
   public static inline var COLOR = "renk";
-  public static var TYPES = [TEXT, NUMBER, INTEGER, FLAG, CHOICE, REFERENCE, COLOR];
+  // res altındaki bir dosyanın yolu (model, doku): eşyanın modeli gibi.
+  public static inline var ASSET = "varlik";
+  public static var TYPES = [TEXT, NUMBER, INTEGER, FLAG, CHOICE, REFERENCE, COLOR, ASSET];
 
   public var name(default, null) : String;
   public var title : String;

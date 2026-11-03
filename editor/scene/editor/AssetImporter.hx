@@ -50,7 +50,7 @@ class AssetImporter {
     var settings = try ImportSettings.read(source) catch (e : Dynamic) return {target: null, problems: ['${ImportSettings.path(source)} okunamadı: $e']};
     var trimmed = ModelTrim.apply(hmd, settings.trim);
     var problems = [];
-    var clips = ModelClips.merge(hmd, loadClips(settings, problems), problems);
+    var clips = ModelClips.merge(hmd, loadClips(hmd, settings, problems), problems);
 
     if (target == null) target = targetOf(source);
     createDirectory(Path.directory(target));
@@ -68,9 +68,14 @@ class AssetImporter {
     new hxd.fmt.hmd.Writer(out).write(hmd);
     File.saveBytes(target, out.getBytes());
     // İskeletli modelin oyunda yerleşmesi için boy, birim, kalça, bakış yönü ve klip hızları.
-    var info = ModelClips.describe(hmd, clips);
+    var info = ModelClips.describe(hmd, clips, settings.sockets);
     if (info != null) File.saveContent(infoPath(target), haxe.Json.stringify(info, null, "  ") + "\n");
+    else if (FileSystem.exists(infoPath(target))) FileSystem.deleteFile(infoPath(target));
     forgetMissingFiles();
+    // Bu modeli gösteren nesneler önbelleği bırakıp yeniden kurulur.
+    var resource = StringTools.startsWith(target, "res/") ? target.substr(4) : target;
+    scene.ModelLibrary.forget(resource);
+    scene.AssetWatch.changed(resource);
     var triangles = 0;
     for (geometry in hmd.geometries) triangles += Std.int(geometry.indexCount / 3);
     return {target: target, problems: problems, triangles: triangles - trimmed, parts: hmd.geometries.length, trimmed: trimmed, clips: clips};
@@ -80,22 +85,51 @@ class AssetImporter {
     return Path.withoutExtension(target) + ".model.json";
   }
 
-  function loadClips(settings : ImportSettings, problems : Array<String>) : Array<ModelClips.ClipSource> {
+  // Klibin kendi iskeleti (dinlenme pozu) bir okuyucudan, kareleri başka bir okuyucudan alınır:
+  // Heaps loadAnimation'ı aynı okuyucuda ikinci kez çağırınca açıları yeniden radyana çevirir.
+  function clipAnimation(source : String, rig : hxd.fmt.hmd.Data) {
+    var skeleton = load(source, true, false).hmd;
+    var fresh = hxd.fmt.fbx.Parser.parse(File.getBytes(source));
+    FbxCurves.sync(fresh);
+    var library = new hxd.fmt.fbx.HMDOut(source);
+    library.load(fresh);
+    // Heaps FBX'i X'te aynalayarak alır; toHMD bunu kendisi yapar, ayrı okuyucuda elle çağrılmalı.
+    // Çağrılmazsa klibin dönüşleri aynalanmaz: çok eksenli eklemler (köprücük, baş) ters döner,
+    // kollar gövdenin öbür yanına geçer.
+    library.leftHandConvert();
+    var animation = library.loadAnimation();
+    var fixed = ModelClips.retarget(animation, rig, skeleton);
+    return {library: library, animation: animation, fixed: fixed};
+  }
+
+  function loadClips(rig : hxd.fmt.hmd.Data, settings : ImportSettings, problems : Array<String>) : Array<ModelClips.ClipSource> {
     var found = [];
     for (spec in settings.clips) {
       if (!FileSystem.exists(spec.source)) {
         problems.push('klibin kaynağı yok: ${spec.source}');
         continue;
       }
+      if (spec.arms != null && !FileSystem.exists(spec.arms)) {
+        problems.push('klibin kol kaynağı yok: ${spec.arms}');
+        continue;
+      }
       try {
-        var loaded = load(spec.source, false);
-        // Ölçüm için dosya ayrıca açılır: Heaps loadAnimation'ı aynı okuyucuda ikinci kez çağırınca
-        // dönüşleri yeniden radyana çevirir, açılar 57 kat küçülür. toHMD onu zaten bir kez çağırdı.
-        var fresh = hxd.fmt.fbx.Parser.parse(File.getBytes(spec.source));
-        FbxCurves.sync(fresh);
-        var library = new hxd.fmt.fbx.HMDOut(spec.source);
-        library.load(fresh);
-        found.push({spec: spec, hmd: loaded.hmd, animation: library.loadAnimation()});
+        var clip = clipAnimation(spec.source, rig);
+        var library = clip.library, animation = clip.animation, fixed = clip.fixed;
+        if (spec.arms != null) {
+          var held = ModelClips.holdArms(animation, clipAnimation(spec.arms, rig).animation, rig);
+          if (held == 0) problems.push('${spec.name}: ${spec.arms} klibinde kol eklemi bulunamadı');
+        }
+        // makeAnimation toHMD'nin kurduğu sürüme ve yazma tamponuna dayanır; rigle aynı sürüm yazılır.
+        @:privateAccess {
+          library.d = new hxd.fmt.hmd.Data();
+          library.d.version = rig.version;
+          library.dataOut = new haxe.io.BytesOutput();
+        }
+        var data = new hxd.fmt.hmd.Data();
+        data.animations = [@:privateAccess library.makeAnimation(animation)];
+        data.data = @:privateAccess library.dataOut.getBytes();
+        found.push({spec: spec, hmd: data, animation: animation, retargeted: fixed});
       } catch (e : Dynamic) problems.push('${spec.source} klibi okunamadı: $e');
     }
     return found;
@@ -109,7 +143,7 @@ class AssetImporter {
     var before = ModelTrim.floorMap(hmd, floorFraction);
     var trimmed = ModelTrim.apply(hmd, boxes);
     var problems = [];
-    var clips = ModelClips.merge(hmd, loadClips(settings, problems), problems);
+    var clips = ModelClips.merge(hmd, loadClips(hmd, settings, problems), problems);
     var triangles = 0;
     for (geometry in hmd.geometries) triangles += Std.int(geometry.indexCount / 3);
     return {
@@ -120,7 +154,8 @@ class AssetImporter {
       clips: [for (anim in hmd.animations) {name: anim.name, frames: anim.frames, seconds: Math.round(anim.frames / anim.sampling * 100) / 100, loop: anim.loop}],
       settings: ImportSettings.path(source),
       clipSources: settings.clips,
-      character: ModelClips.describe(hmd, clips),
+      character: ModelClips.describe(hmd, clips, settings.sockets),
+      sockets: settings.sockets,
       problems: problems,
       trim: {boxes: boxes, trimmed: trimmed},
       floor: boxes.length == 0 ? before : ({before: before, after: ModelTrim.floorMap(hmd, floorFraction)} : Dynamic),
@@ -160,7 +195,7 @@ class AssetImporter {
     function newer(path : String) return FileSystem.exists(path) && FileSystem.stat(path).mtime.getTime() > built;
     if (newer(source) || newer(ImportSettings.path(source))) return true;
     var clips = try ImportSettings.read(source).clips catch (e : Dynamic) [];
-    return Lambda.exists(clips, clip -> newer(clip.source));
+    return Lambda.exists(clips, clip -> newer(clip.source) || (clip.arms != null && newer(clip.arms)));
   }
 
   function convert(source : String) {
@@ -168,9 +203,9 @@ class AssetImporter {
   }
 
   // Klip kaynağı geometrisiz okunur: modelin kopyası res'e girmez, yalnızca animasyon alınır.
-  function load(source : String, includeGeometry : Bool) {
+  function load(source : String, includeGeometry : Bool, unpack = true) {
     var root = hxd.fmt.fbx.Parser.parse(File.getBytes(source));
-    if (includeGeometry) unpackTextures(root, source);
+    if (includeGeometry && unpack) unpackTextures(root, source);
     FbxCurves.sync(root);
     var out = new hxd.fmt.fbx.HMDOut(source);
     out.load(root);

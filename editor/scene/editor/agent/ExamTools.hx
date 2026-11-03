@@ -194,6 +194,10 @@ class ExamTools {
       case "unchanged":
         var steps = editor.commands.undoCount - base.undoCount;
         return {ok: steps == 0, detail: steps == 0 ? "geçmişe adım eklenmedi" : '$steps adım eklendi'};
+      // Görsel işte ajan sonucu gözle denetlemeli: görev başladıktan sonra bu araç başarıyla çağrıldı mı.
+      case "tool_used":
+        var calls = editor.agent.log.filter(entry -> entry.tool == spec.tool && entry.ok && entry.time >= base.wall).length;
+        return {ok: calls > 0, detail: '${spec.tool} $calls kez çağrıldı'};
       case "max_steps":
         var steps = editor.commands.undoCount - base.undoCount;
         return {ok: steps >= 1 && steps <= spec.steps, detail: '$steps geri alma adımı'};

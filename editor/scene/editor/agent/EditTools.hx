@@ -59,8 +59,10 @@ class EditTools {
       operations: {type: "array", items: {type: "object"}},
       expectedRevision: revision,
     }, editScene, false, ["label", "operations"]);
-    tool("edit_table", "Bir veri tablosunu değiştirir: set [{id, values}], add [{id, values}], delete [ids]. Kullanılan satır silinmez, kimliği değişmez.", {
+    tool("edit_table", "Bir veri tablosunu değiştirir: set [{id, values}], add [{id, values}], delete [ids]. Kullanılan satır silinmez, kimliği değişmez. "
+      + "addColumns [{name, title, type, options?, table?}]: type metin, sayi, tam, evet_hayir, secim (options gerekir), baglanti (table gerekir), renk, varlik (res altındaki dosya yolu, ör. models/tufek/tufek.hmd); var olan satırlar varsayılan değeri alır. removeColumns [ad]. Sütunlar satırlardan önce işlenir.", {
       table: {type: "string"}, set: {type: "array", items: {type: "object"}}, add: {type: "array", items: {type: "object"}},
+      addColumns: {type: "array", items: {type: "object"}}, removeColumns: {type: "array", items: {type: "string"}},
       delete: {type: "array", items: {type: "string"}}, label: {type: "string"}, expectedRevision: revision,
     }, editTable, false, ["table"]);
     tool("edit_dialog", "Bir diyaloğu değiştirir veya oluşturur (create true). nodes: düğümleri kimliğe göre ekler veya günceller (diyalog dosyasındaki biçim: id, type baslangic|satir|secenek|kosul|olay|bitis, speaker, text, next, choices [{text, next}], kind degisken|esya, name, value, yes, no, event). remove: silinecek düğümler. arrange: düğümleri akışa göre dizer.", {
@@ -86,14 +88,16 @@ class EditTools {
     tool("list_models", "Modeller. models: res altındaki yerleştirilebilir modeller; model bileşeninin path alanına bu yol yazılır. notImported: assets altında olup içe aktarılmamış veya kaynağı sonradan değişmiş FBX'ler, import_model ile alınır.", {}, _ -> listModels(), true);
     server.add({name: "import_model", readOnly: false, run: importModel,
       description: "assets altındaki bir FBX'i Asset Browser'daki Model içe aktar gibi dönüştürür, res/models altına yazar. Dosya işidir, geri alma adımı değildir; yeniden alınca sahnelerdeki yol değişmez. Büyük modelde editör bir süre tepki vermez. Dönen path'i model bileşenine yaz. "
-        + "trim verilirse kaynağın yanındaki .aktarim.json'a yazılır ve kutuların içinde kalan üçgenler atılır (yapay zekâ modellerindeki yer plakası, havada kalan parça); [] kırpmayı kaldırır. Kutuları model_info'nun sınırlarına ve taban haritasına göre seç.",
+        + "trim verilirse kaynağın yanındaki .aktarim.json'a yazılır ve kutuların içinde kalan üçgenler atılır (yapay zekâ modellerindeki yer plakası, havada kalan parça); [] kırpmayı kaldırır. Kutuları model_info'nun sınırlarına ve taban haritasına göre seç. "
+        + "sockets takma noktalarıdır, aynı dosyaya yazılır; [] verilirse iskeletli modelde varsayılanlar (sag_el, sol_el, sirt, bel, bas) kullanılır. Sonucu preview_character ile gözle denetle.",
       schema: {type: "object", properties: {
         source: {type: "string", description: "assets yolu veya dosya adının bir parçası"},
         trim: {type: "array", description: "[{min: [x, y, z], max: [x, y, z], note?}], modelin kendi birimleriyle, Z yukarı", items: {type: "object"}},
-        clips: {type: "array", description: "[{name, source}]: aynı iskeletle üretilmiş başka FBX'lerin klipleri bu modele eklenir. Karakter durma, yurume, kosma adlarını kullanır; [] klipleri kaldırır", items: {type: "object"}},
+        clips: {type: "array", description: "[{name, source, arms?}]: aynı iskeletle üretilmiş başka FBX'lerin klipleri bu modele eklenir. Karakter durma, yurume, kosma, hizli_kosma adlarını kullanır; silah türünün seti _tur ekiyle (durma_tufek). arms verilirse kollar (köprücükten ele) o FBX'in klibinin ilk karesinde sabit kalır, gövde ve bacaklar source'tan: kütüphanede olmayan silahlı klip böyle türetilir (silahsız durma + tüfekli koşunun kolları). [] klipleri kaldırır", items: {type: "object"}},
+        sockets: {type: "array", description: "[{name, joint, offset: [x, y, z], rotation: [x, y, z]}]: takma noktaları. Karakterde eksenler X ileri, Y sağ, Z yukarı (bağlama pozundaki gövdeye göre); offset metre, eklemin dinlenme pozundaki yerine göre; rotation derece. El noktasında X bilekten parmaklara, Z yumruğun deliği boyunca başparmağa. Silah modelinde joint boş, name tutamak: kabzanın avuçta duracağı yer, X namlu yönünde, Z yukarı", items: {type: "object"}},
       }, required: ["source"]}});
     server.add({name: "model_info", readOnly: true, run: modelInfo,
-      description: "assets altındaki bir FBX'i dönüştürmeden inceler: sınırlar (modelin birimleriyle, Z yukarı), üçgen sayısı, iskelet eklemleri, klipler, kırpma ayarı ve taban haritası. Taban haritası alt %3'teki üçgenlerin yukarıdan sayısıdır: ayaklar iki küme olur, başka küme genellikle fazlalıktır. Büyük modelde editör bir süre tepki vermez.",
+      description: "assets altındaki bir FBX'i dönüştürmeden inceler: sınırlar (modelin birimleriyle, Z yukarı), üçgen sayısı, iskelet eklemleri, klipler, takma noktaları (sockets: ayardakiler, character.sockets: oyunun kullanacakları, varsayılanlar dahil), kırpma ayarı ve taban haritası. Taban haritası alt %3'teki üçgenlerin yukarıdan sayısıdır: ayaklar iki küme olur, başka küme genellikle fazlalıktır. Büyük modelde editör bir süre tepki vermez.",
       schema: {type: "object", properties: {
         source: {type: "string", description: "assets yolu veya dosya adının bir parçası"},
         floorFraction: {type: "number", description: "Taban haritasının yüksekliği, modelin boyuna oranla (varsayılan 0.03)"},
@@ -335,6 +339,18 @@ class EditTools {
     var before = editor.data.text(name);
     if (before == null) throw 'Tablo yok: $name. Tablolar: ${editor.data.names().join(", ")}';
     var table = DataTable.read(name, before);
+    var dropped : Array<String> = args.removeColumns == null ? [] : args.removeColumns;
+    for (column in dropped) {
+      if (table.column(column) == null) throw '${table.title} tablosunda "$column" sütunu yok';
+      table.columns = table.columns.filter(item -> item.name != column);
+      for (row in table.rows) row.remove(column);
+    }
+    var columns : Array<Dynamic> = args.addColumns == null ? [] : args.addColumns;
+    for (spec in columns) {
+      var column = checkColumn(table, spec);
+      table.columns.push(column);
+      for (row in table.rows) row.set(column.name, DataTable.defaultValue(column));
+    }
     var removed : Array<String> = args.delete == null ? [] : args.delete;
     for (id in removed) {
       var used = DataUsage.find(editor, name, id);
@@ -359,6 +375,27 @@ class EditTools {
     return {table: name, rows: table.rows.length, revision: editor.commands.revision, changed: after != before};
   }
 
+  // Data panelindeki "+ Sütun" gibi: ad başlıktan türer, seçim seçenek ister, bağlantı tablo ister.
+  function checkColumn(table : DataTable, spec : Dynamic) : scene.data.DataTable.DataColumn {
+    var title : String = spec.title != null ? spec.title : spec.name;
+    var name = SceneDocument.cleanName(spec.name != null ? spec.name : title);
+    var type : String = spec.type;
+    if (name == "" || name == "id") throw 'sütun adı geçersiz: ${haxe.Json.stringify(spec)}';
+    if (table.column(name) != null) throw 'bu adda sütun var: $name';
+    if (DataTable.TYPES.indexOf(type) < 0) throw 'sütun türü şunlardan biri olmalı: ${DataTable.TYPES.join(", ")}';
+    var column : scene.data.DataTable.DataColumn = {name: name, title: title, type: type};
+    if (type == DataTable.CHOICE) {
+      var options : Array<String> = spec.options;
+      if (options == null || options.length == 0) throw '$name: seçim sütunu options ister';
+      column.options = options;
+    }
+    if (type == DataTable.REFERENCE) {
+      if (spec.table == null || editor.data.text(spec.table) == null) throw '$name: bağlantı sütunu var olan bir table ister';
+      column.table = spec.table;
+    }
+    return column;
+  }
+
   function fill(table : DataTable, row : haxe.DynamicAccess<Dynamic>, values : Dynamic) {
     if (values == null) return;
     for (key in Reflect.fields(values)) {
@@ -371,6 +408,7 @@ class EditTools {
         case DataTable.FLAG: if (!Std.isOfType(value, Bool)) throw '${column.title} true veya false olmalı';
         case DataTable.CHOICE: if (column.options == null || column.options.indexOf(value) < 0) throw '${column.title} şunlardan biri olmalı: ${column.options}';
         case DataTable.REFERENCE: if (value != "" && !editor.data.exists(column.table, value)) throw '${column.title}: ${column.table} tablosunda "$value" yok';
+        case DataTable.ASSET: if (!Std.isOfType(value, String) || (value != "" && !FileSystem.exists('$RESOURCE_DIRECTORY/$value'))) throw '${column.title}: res altında dosya yok: $value';
         default: if (!Std.isOfType(value, String)) throw '${column.title} metin olmalı';
       }
       row.set(column.name, value);
@@ -525,7 +563,7 @@ class EditTools {
   // Asset Browser gibi: dönüştürme birkaç kare sonra başlar, tasarımcı durum satırında ne olduğunu görür.
   function importModel(args : Dynamic) : AgentReply {
     var source = modelSource(args.source);
-    if (args.trim != null || args.clips != null) {
+    if (args.trim != null || args.clips != null || args.sockets != null) {
       var settings = ImportSettings.read(source);
       if (args.trim != null) {
         var boxes : Array<Dynamic> = args.trim;
@@ -538,6 +576,10 @@ class EditTools {
           spec.source = modelSource(spec.source);
           spec;
         }];
+      }
+      if (args.sockets != null) {
+        var sockets : Array<Dynamic> = args.sockets;
+        settings.sockets = [for (socket in sockets) ImportSettings.checkSocket(socket)];
       }
       settings.write(source);
     }
@@ -554,7 +596,9 @@ class EditTools {
       AssetImporter.forgetMissingFiles();
       editor.document.validate();
       editor.show('İçe aktarıldı: ${result.target} (${result.triangles} üçgen, ${result.parts} parça${result.trimmed > 0 ? ", " + result.trimmed + " üçgen kırpıldı" : ""})');
-      return {value: {source: source, path: result.target.substr(RESOURCE_DIRECTORY.length + 1), triangles: result.triangles, parts: result.parts, trimmed: result.trimmed, clips: result.clips, problems: result.problems}};
+      var info = AssetImporter.infoPath(result.target);
+      var sockets : Dynamic = FileSystem.exists(info) ? haxe.Json.parse(sys.io.File.getContent(info)).sockets : null;
+      return {value: {source: source, path: result.target.substr(RESOURCE_DIRECTORY.length + 1), triangles: result.triangles, parts: result.parts, trimmed: result.trimmed, clips: result.clips, sockets: sockets == null ? [] : sockets, problems: result.problems}};
     }};
   }
 

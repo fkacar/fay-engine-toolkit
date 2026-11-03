@@ -15,7 +15,7 @@ class DataPanel {
   static inline var ID_WIDTH = 120.;
   static inline var DELETE_WIDTH = 34.;
 
-  static var TYPE_TITLES = ["Metin", "Sayı", "Tam sayı", "Evet/Hayır", "Seçim", "Tablo bağlantısı", "Renk"];
+  static var TYPE_TITLES = ["Metin", "Sayı", "Tam sayı", "Evet/Hayır", "Seçim", "Tablo bağlantısı", "Renk", "Varlık (dosya)"];
 
   var editor : Editor;
   var current = "";
@@ -149,6 +149,19 @@ class DataPanel {
         var number : Int = value;
         if (ImGui.inputInt("##deger", number, 0, 0)) row.set(column.name, number);
         track(column.title);
+      case DataTable.ASSET:
+        // Asset Browser'dan sürüklenen dosya bırakılır, yol elle de yazılabilir.
+        var text : String = value;
+        if (ImGui.inputText("##deger", text)) row.set(column.name, text);
+        track(column.title);
+        if (ImGui.beginDragDropTarget()) {
+          if (ImGui.acceptDragDropPayload(AssetBrowser.PAYLOAD) != null && editor.assetDrag != null) {
+            var dropped = editor.assetDrag, id = row.get("id");
+            change(column.title, data -> data.find(id).set(column.name, dropped));
+          }
+          ImGui.endDragDropTarget();
+        }
+        if (text != "" && !hxd.Res.loader.exists(text) && ImGui.isItemHovered()) ImGui.setTooltip('Dosya yok: res/$text');
       case DataTable.COLOR:
         var color : Int = value;
         var rgb = new hl.NativeArray<Single>(3);

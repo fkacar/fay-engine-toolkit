@@ -1699,6 +1699,27 @@ class TestMain {
     check(!NavBaker.bake(0, world, terrain, []).isBlocked(15, 10), "eğim sınırı kalkınca tepeye çıkılır");
   }
 
+  // Dosya yolu sütunu ve tablo değişince oyun verisinin yeniden okunması. Takma noktaları (ImportSettings)
+  // Heaps ister, editör düzeneğinde import_model ile sınanır.
+  static function testSockets() {
+    check(DataTable.TYPES.indexOf(DataTable.ASSET) >= 0, "dosya yolu sütun türü");
+    var items = new DataTable("esyalar", "Eşyalar");
+    items.columns = [{name: "model", title: "Model", type: DataTable.ASSET}];
+    equals(items.addRow("tufek").get("model"), "", "dosya yolu varsayılanı boş");
+    items.find("tufek").set("model", "models/tufek/tufek.hmd");
+    var text = items.write();
+    equals(DataTable.read("esyalar", text).find("tufek").get("model"), "models/tufek/tufek.hmd", "dosya yolu okunmalı");
+
+    var files = ["data/esyalar.table.json" => text];
+    var data = new GameData(path -> files.get(path));
+    equals(data.row("esyalar", "tufek").get("model"), "models/tufek/tufek.hmd", "oyun satırı");
+    items.find("tufek").set("model", "");
+    files.set("data/esyalar.table.json", items.write());
+    equals(data.row("esyalar", "tufek").get("model"), "models/tufek/tufek.hmd", "önbellek forget'e kadar eskiyi verir");
+    data.forget("esyalar");
+    equals(data.row("esyalar", "tufek").get("model"), "", "forget sonrası yeni dosya okunmalı");
+  }
+
   static function testDataTables() {
     var table = new DataTable("esyalar", "Eşyalar");
     table.columns = [
@@ -2019,6 +2040,7 @@ class TestMain {
     testNavRules();
     testSurfaces();
     testDataTables();
+    testSockets();
     testStory();
     testDialogLayout();
     testThreeWay();

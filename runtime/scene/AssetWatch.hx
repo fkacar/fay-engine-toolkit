@@ -24,6 +24,12 @@ class AssetWatch {
     hxd.Res.load(path).watch(null);
   }
 
+  // Editör bir dosyayı kendisi yazınca (model içe aktarma) dinleyiciler hemen haberdar edilir: Heaps'in
+  // izlemesi birkaç kare sonra gelir, o arada önbellekteki eski başlık yeni dosyayı yanlış okur.
+  public static function changed(path : String) {
+    if (listeners.exists(path)) notify(path);
+  }
+
   static function notify(path : String) {
     for (listener in listeners.get(path).copy()) listener();
   }

@@ -184,10 +184,19 @@ Yeni bir dosya türü yazan kod bu yoldan geçmelidir.
 
 **Model içe aktarma:** `AssetImporter` FBX'i HMD'ye çevirmeden önce `FbxCurves.sync` ile animasyon eğrilerini eşitler. Heaps bir düğümün X, Y, Z eğrilerini ilk eğrinin anahtar zamanlarıyla okur, eksen eksen azaltılmış anahtarlar sıfıra düşerdi. Ayarlar kaynağın yanındaki `<ad>.aktarim.json` dosyasındadır (`ImportSettings`: `trim`, `clips`).
 - `ModelTrim` kutularla üçgen kırpar. Üçgen tek noktaya indirilir, köşe ve deri verisi bozulmaz.
-- `ModelClips` başka FBX'lerin kliplerini geometrisiz okuyup HMD'ye ekler, adım hızını ölçer. Ölçüm için FBX ayrıca açılır: Heaps `loadAnimation`'ı aynı okuyucuda ikinci kez çağırınca açıları yeniden radyana çevirir.
+- `ModelClips` başka FBX'lerin kliplerini HMD'ye ekler, rigin dinlenme pozuna yeniden hedefler (`retarget`) ve adım hızını ölçer.
+  - Klipler ayrı bir `HMDOut` ile okunur; `leftHandConvert()` `loadAnimation()`'dan önce çağrılmalı, yoksa dönüşler aynalanmaz ve kollar yer değiştirir.
+  - Klip satırında `arms` verilirse kol eklemleri (köprücükten ele) o klibin ilk karesinde sabit kalır (`holdArms`): kütüphanede olmayan silahlı klipler böyle türetilir.
+- Takma noktaları (`ImportSettings.sockets`) `<ad>.model.json`'a yazılır; iskeletli modelde ayar yoksa Mixamo eklemlerine varsayılanlar (avuç ele bağlı köşelerden). Eksen bağlama pozundaki gövdeye göre, yönü `socketFrame`. İskeletsiz modelde yalnızca noktalar yazılır.
+- Veri tablolarında `varlik` türü: `res/` altındaki dosya yolu. `GameData.forget` tablo değişince önbelleği bırakır.
+- `Editor.requestRender` çizim karesinin içinde bir kez ekran dışı çizim yaptırır (oyunun ajan önizlemesi bununla çizer).
+  - Yeniden hedefleme: her eklem için rig dünya = rig dinlenme × klip dinlenmesi⁻¹ × klip dünya. Kemik boyları rigden alınır.
+  - Klibin iskeleti bir okuyucudan, kareleri ayrı bir okuyucudan gelir. Heaps `loadAnimation`'ı aynı okuyucuda ikinci kez çağırınca açıları yeniden radyana çevirir.
+  - Kareler `HMDOut.makeAnimation` ile yazılır.
 - İskeletli modelin yanına `<ad>.model.json` yazılır: boy, kalçanın yeri ve klip hızları metre cinsinden, bakış yönü (yürürken yere basan ayağın tersi).
 - Ayar dosyası veya bir klibin kaynağı HMD'den yeniyse model yeniden alınacaklar listesine girer.
 - Çalışma zamanında `ModelLibrary.animation(path, name)` adlı klibi önbellekten verir.
+- İçe aktarma, yazdığı modeli `ModelLibrary`'den düşürür ve `AssetWatch.changed` ile dinleyicileri hemen haberdar eder. Önbellekte kalan eski başlık yeni dosyayı yanlış okur; deride boş erişim olur.
 - Ajan araçları: `model_info` (sınırlar, eklemler, klipler, karakter bilgisi, taban haritası) ve `import_model`'in `trim` ve `clips` alanları. Yazma araçları editör komutlarını kullanır ve çağrıyı tek adım olarak geçmişe yazar (`CommandStack.record`). Hata olursa uygulanan komutlar geri alınır. Ekran görüntüsü için oyunun `Main.render`'ı `super.render(e)`'den sonra `editor.afterRender(e)` çağırmalıdır, şablon bunu yapar. Oyun kendi aracını `editor.agent.add({name, description, schema, readOnly, run})` ile ekler. `run` bir nesne döndürür: `{value}` JSON olarak, `{text}` düz metin olarak, `{png}` görüntü olarak gider. Projenin `.mcp.json`'u ve `.claude/settings.json`'u şablonda `mcp.json` ve `claude-settings.json` adlarıyla durur, `new-project.sh` yerine koyar. `settings.json`'daki `PostToolUse` hook'u `tools/agent-hook.sh`'ı çalıştırır. Betik, editörün iki saniyede bir yazdığı `.editor/ajan-durum.json`'a bakar. Editör kapalıysa sessiz kalır, sunucuya hiç bağlanmaz; bu yüzden editör kapalıyken hata mesajı çıkmaz.
 
 ## Oyun gözü ve görev testleri

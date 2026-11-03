@@ -442,6 +442,13 @@ class Editor {
   }
 
   // Ajan için ekran görüntüsü: çizim bittikten sonra okunur. İstenirse önce nesne adları yazılır.
+  // Ekran dışı çizim (ajanın önizlemesi gibi): çizim karesinin içinde, motor hazırken bir kez çalışır.
+  var renderJobs : Array<h3d.Engine->Void> = [];
+
+  public function requestRender(job : h3d.Engine->Void) {
+    renderJobs.push(job);
+  }
+
   public function requestCapture(labels : Bool, done : hxd.Pixels->Void) {
     captureWaiters.push(done);
     if (labels) labelFrames = 2;
@@ -449,6 +456,11 @@ class Editor {
 
   // Oyunun App'i super.render'dan sonra çağırır: arka tampon panellerle birlikte tamamdır.
   public function afterRender(engine : h3d.Engine) {
+    if (renderJobs.length > 0) {
+      var jobs = renderJobs;
+      renderJobs = [];
+      for (job in jobs) job(engine);
+    }
     if (captureWaiters.length == 0 || labelFrames > 1) return;
     var pixels = hxd.Pixels.alloc(engine.width, engine.height, RGBA);
     #if hlsdl

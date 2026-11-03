@@ -21,6 +21,11 @@ class GameData {
     return table;
   }
 
+  // Tablo dosyası değişince (editörde düzenleme) bir sonraki okuma yeniden ayrıştırır. Ad yoksa hepsi.
+  public function forget(?name : String) {
+    if (name == null) tables.clear() else tables.remove(name);
+  }
+
   public function row(table : String, id : String) : Null<DynamicAccess<Dynamic>> {
     var data = this.table(table);
     return data == null ? null : data.find(id);
