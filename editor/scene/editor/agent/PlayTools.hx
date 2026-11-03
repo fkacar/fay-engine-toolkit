@@ -17,7 +17,7 @@ class PlayTools {
   public function new(editor : Editor, server : AgentServer) {
     this.editor = editor;
     server.add({name: "get_game_state", readOnly: true,
-      description: "Editörden açılan oyunun (F5 veya görev testi) o anki durumu: eşyalar, değişkenler, fraksiyon ilişkileri, açık diyalog ve seçenekleri, son bildirimler, ekip birimlerinin konumu ve yürüyüp yürümediği, NPC grupları, oyun kamerası. Oyun saniyede dört kez yazar.",
+      description: "Editörden açılan oyunun (F5 veya görev testi) o anki durumu: eşyalar, değişkenler, fraksiyon ilişkileri, açık diyalog ve seçenekleri, son bildirimler, ekip birimlerinin konumu ve yürüyüp yürümediği, NPC grupları, oyun kamerası ve oyunun eklediği alanlar (örneğin otomatik kaydın durumu). Oyun saniyede dört kez yazar.",
       schema: {type: "object", properties: {}},
       run: _ -> ({value: state()} : AgentReply)});
     server.add({name: "get_game_trace", readOnly: true,

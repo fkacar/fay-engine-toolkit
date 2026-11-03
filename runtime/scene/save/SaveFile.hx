@@ -7,6 +7,9 @@ import haxe.io.BytesOutput;
 // Kayıt dosyasının kabı: adlı bölümler (her biri sıkıştırılmış), sonda sağlama. Oyun bölümlerin içine ne
 // koyacağına kendisi karar verir (meta, genel, hücreler...). Dosya platformdan bağımsızdır.
 //   "KYT1" | u16 bölüm sayısı | her bölüm: u16 ad uzunluğu, ad, u32 açık boy, u32 sıkışık boy | veriler | u32 CRC32
+// Sıkıştırılmış bölüm: hücre bölümleri önbellekte böyle durur, arka plandaki yazıcı yalnızca birleştirir.
+typedef PackedSection = {name : String, raw : Int, packed : Bytes};
+
 class SaveFile {
   static inline var MAGIC = "KYT1";
   // Geçici dosya ve yedek .kayit ile bitmez: Steam Cloud yalnızca tam kayıtları görür.
@@ -14,19 +17,27 @@ class SaveFile {
   public static inline var BACKUP_SUFFIX = ".yedek";
 
   public static function encode(sections : Array<{name : String, data : Bytes}>) : Bytes {
-    // Boş bölüm sıkıştırılmaz: HashLink'in zlib'i boş girdide hata verir.
-    var packed = [for (section in sections) section.data.length == 0 ? Bytes.alloc(0) : haxe.zip.Compress.run(section.data, 6)];
+    return encodePacked([for (section in sections) pack(section.name, section.data)]);
+  }
+
+  // Boş bölüm sıkıştırılmaz: HashLink'in zlib'i boş girdide hata verir.
+  public static function pack(name : String, data : Bytes) : PackedSection {
+    return {name: name, raw: data.length, packed: data.length == 0 ? Bytes.alloc(0) : haxe.zip.Compress.run(data, 6)};
+  }
+
+  // Sıkıştırılmış bölümlerden dosya: başlık, veriler, sağlama. Arka planda çalışabilir (yalnızca baytlara dokunur).
+  public static function encodePacked(sections : Array<PackedSection>) : Bytes {
     var out = new BytesOutput();
     out.writeString(MAGIC);
     out.writeUInt16(sections.length);
-    for (i in 0...sections.length) {
-      var name = Bytes.ofString(sections[i].name);
+    for (section in sections) {
+      var name = Bytes.ofString(section.name);
       out.writeUInt16(name.length);
       out.write(name);
-      out.writeInt32(sections[i].data.length);
-      out.writeInt32(packed[i].length);
+      out.writeInt32(section.raw);
+      out.writeInt32(section.packed.length);
     }
-    for (data in packed) out.write(data);
+    for (section in sections) out.write(section.packed);
     var body = out.getBytes();
     var result = new BytesOutput();
     result.write(body);

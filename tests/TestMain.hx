@@ -1407,6 +1407,61 @@ class TestMain {
     equals(index.candidates(0, "sayac").length, 2, "aynı hücrede aynı türden adaylar");
   }
 
+  // Donmasız kayıt: hücre bölümü önbelleği, arka planda yazma, ana kare bütçesi.
+  static function testSaveWriter() {
+    function deltaOf(count : Int, cells : Int) {
+      var items = [for (i in 0...count) {id: "n" + i, cell: i % cells, components: {sayac: {hits: i, x: i * 0.5, y: -i * 0.25}}}];
+      return scene.save.WorldDelta.fromData(haxe.Json.parse(haxe.Json.stringify(items)));
+    }
+    var delta = deltaOf(9, 3);
+    var sections = new scene.save.DeltaSections();
+    var first = sections.sections(delta);
+    equals([for (s in first) s.name].join(","), "hucre/0,hucre/1,hucre/2", "hücre bölümleri");
+    delta.markRemoved(["n1"]);
+    var second = sections.sections(delta);
+    check(second[0].packed == first[0].packed && second[2].packed == first[2].packed && second[1].packed != first[1].packed, "yalnızca değişen hücre yeniden kodlanmalı");
+    var decoded = scene.save.SaveFile.decode(scene.save.SaveFile.encodePacked(second));
+    var cell1 : Dynamic = haxe.Json.parse(decoded.get("hucre/1").toString());
+    check((cell1.silinenler : Array<Dynamic>).length == 1 && (cell1.durumlar : Array<Dynamic>).length == 2, "değişen hücrenin bölümü güncel");
+    check(sections.sections(scene.save.WorldDelta.fromData([])).length == 0, "yeni fark deposunda önbellek baştan");
+
+    var base = Sys.getEnv("TMPDIR");
+    var dir = (base == null ? "/tmp" : base) + "/yazici_testi_" + Std.random(1000000000);
+    sys.FileSystem.createDirectory(dir);
+    var meta = scene.save.SaveFile.pack("meta", haxe.io.Bytes.ofString('{"format": 3}'));
+    function job(path : String, n : Int, ?remove : Array<String>) : scene.save.SaveWriter.WriteJob
+      return {path: path, sections: [meta, scene.save.SaveFile.pack("deneme", haxe.io.Bytes.ofString('{"n": $n}'))], remove: remove == null ? [] : remove, tag: n};
+    var sync = new scene.save.SaveWriter(false);
+    sync.submit(job('$dir/a.kayit', 1));
+    var done = sync.poll();
+    check(done.length == 1 && done[0].error == null && sync.pending == 0 && sys.FileSystem.exists('$dir/a.kayit'), "eşzamanlı yazıcı");
+    sync.submit(job('$dir/b.kayit', 2, ['$dir/a.kayit', '$dir/yazilmaz.txt']));
+    sync.poll();
+    check(!sys.FileSystem.exists('$dir/a.kayit') && sys.FileSystem.exists('$dir/b.kayit'), "yazmadan önce silinecekler (yalnızca .kayit)");
+    #if hl
+    // Gerçek iş parçacığı: işler sırayla, aynı dosyaya son yazılan kalır.
+    var threaded = new scene.save.SaveWriter(true);
+    for (n in 3...7) threaded.submit(job('$dir/c.kayit', n));
+    var all = threaded.flush();
+    var last : Dynamic = haxe.Json.parse(scene.save.SaveFile.decode(sys.io.File.getBytes('$dir/c.kayit')).get("deneme").toString());
+    check(all.length == 4 && Lambda.foreach(all, r -> r.error == null) && last.n == 6 && threaded.pending == 0, 'iş parçacığında sırayla yazma: ${last.n}');
+    // Bütçe: 10.000 nesne durumu, 30 hücre; kayıt anında iki hücre değişmiş. Ana karede kodlama 16 ms altında.
+    var big = deltaOf(10000, 30), cached = new scene.save.DeltaSections();
+    var begun = haxe.Timer.stamp();
+    var all = cached.sections(big);
+    var full = (haxe.Timer.stamp() - begun) * 1000;
+    big.touch(3);
+    big.touch(4);
+    begun = haxe.Timer.stamp();
+    var again = cached.sections(big);
+    var partial = (haxe.Timer.stamp() - begun) * 1000;
+    Sys.println('  kayıt bütçesi: hepsi ${Math.round(full * 10) / 10} ms, iki hücre ${Math.round(partial * 10) / 10} ms (${again.length} bölüm)');
+    check(again.length == 30 && partial < 16, 'ana kare bütçesi: iki hücre ${partial} ms');
+    #end
+    for (name in ["b.kayit", "c.kayit", "c.kayit.yedek"]) if (sys.FileSystem.exists('$dir/$name')) sys.FileSystem.deleteFile('$dir/$name');
+    sys.FileSystem.deleteDirectory(dir);
+  }
+
   static function testSaveFiles() {
     var sections = [scene.save.SaveFile.section("meta", {format: 1, name: "Sefer ş"}), {name: "bos", data: haxe.io.Bytes.alloc(0)}];
     var bytes = scene.save.SaveFile.encode(sections);
@@ -1432,12 +1487,12 @@ class TestMain {
     sys.io.File.saveBytes(quick, broken);
     var safe = scene.save.SaveFile.readSafely(quick);
     check(safe.fromBackup && scene.save.SaveFile.json(safe.sections, "meta").name == "Sefer ş", "bozuksa yedek açılmalı");
-    var autos = [for (i in 0...4) {
+    var autos = [for (i in 0...scene.save.SaveSlots.AUTO_COUNT + 1) {
       var path = slots.pathFor(campaign.id, scene.save.SaveSlots.AUTO);
       sys.io.File.saveBytes(path, bytes);
       path;
     }];
-    equals(autos[3], autos[0], "dördüncü otomatik kayıt en eskinin yerine");
+    equals(autos[scene.save.SaveSlots.AUTO_COUNT], autos[0], "yuvalar dolunca otomatik kayıt en eskinin yerine");
     // Sefer araçları: en yeni kayıt, boyut, bitmiş sefer, silme, başka kökten kopya.
     equals(slots.latestOverall() == null ? "" : slots.latestOverall().campaign, campaign.id, "devam et en yeni kaydı bulmalı");
     check(slots.campaignSize(campaign.id) > 0 && slots.campaignSize("yok") == 0, "sefer boyutu");
@@ -1461,7 +1516,7 @@ class TestMain {
     for (name in sys.FileSystem.readDirectory('${other.root}/${campaign.id}')) sys.FileSystem.deleteFile('${other.root}/${campaign.id}/$name');
     sys.FileSystem.deleteDirectory('${other.root}/${campaign.id}');
     sys.FileSystem.deleteDirectory(other.root);
-    equals(slots.saves(campaign.id).filter(e -> e.kind == scene.save.SaveSlots.AUTO).length, 3, "üç otomatik yuva");
+    equals(slots.saves(campaign.id).filter(e -> e.kind == scene.save.SaveSlots.AUTO).length, 5, "beş otomatik yuva");
     equals(scene.save.SaveSlots.kindOf("elle_2026-11-03_120000.kayit"), scene.save.SaveSlots.MANUAL, "elle kayıt türü");
     for (name in sys.FileSystem.readDirectory('$dir/${campaign.id}')) sys.FileSystem.deleteFile('$dir/${campaign.id}/$name');
     sys.FileSystem.deleteDirectory('$dir/${campaign.id}');
@@ -2386,6 +2441,7 @@ class TestMain {
     testRandom();
     testRuntimeEntities();
     testSaveVersions();
+    testSaveWriter();
     testSockets();
     testStory();
     testDialogLayout();

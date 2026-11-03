@@ -22,6 +22,8 @@ class WorldDelta {
   var created = new Map<String, CreatedRecord>();
   // Oluşan bir alt ağacın her kimliği → kökü.
   var createdMember = new Map<String, String>();
+  // Son kayıttan beri değişen hücreler: kayıt dosyasında yalnızca bunlar yeniden kodlanır (DeltaSections).
+  var dirty = new Map<Int, Bool>();
 
   // Hücre yükleyicisi verir: dünyadaki bir noktanın hücresi (taşınan oluşan nesnenin yeni hücresi için).
   public var locate : Null<(Float, Float) -> Int>;
@@ -57,6 +59,7 @@ class WorldDelta {
   // Oyunda yok edildi: nesne ve alt nesneleri. Tasarlanmışsa "silindi" işareti, oyunda kurulmuşsa kayıttan tamamen düşer.
   public function markRemoved(ids : Array<String>) {
     for (id in ids) {
+      touch(cellOf(id));
       states.remove(id);
       var root = createdMember.get(id);
       if (root == null) removed.set(id, cellOf(id));
@@ -65,6 +68,8 @@ class WorldDelta {
   }
 
   public function recordCreated(id : String, scene : Dynamic, cell : Int, owner : String) {
+    if (created.exists(id)) touch(created.get(id).cell);
+    touch(cell);
     // Yenilenirken durumlar kalır (hücre kapanışında önce durum alınır, sonra veri yenilenir).
     if (created.exists(id)) forgetCreated(id, true);
     created.set(id, {id: id, cell: cell, owner: owner, scene: scene});
@@ -113,6 +118,45 @@ class WorldDelta {
     cells.set(entity.id, cell);
   }
 
+  // Hücrenin kayıt bölümü yeniden kodlanacak.
+  public function touch(cell : Int) {
+    dirty.set(cell, true);
+  }
+
+  // Değişen hücreler (ve alınınca temizlenir).
+  public function takeDirty() : Array<Int> {
+    var list = [for (cell in dirty.keys()) cell];
+    dirty = new Map();
+    return list;
+  }
+
+  // Farkı olan bütün hücreler.
+  public function cellsWithData() : Array<Int> {
+    var found = new Map<Int, Bool>();
+    for (id in states.keys()) found.set(cellOf(id), true);
+    for (cell in removed) found.set(cell, true);
+    for (record in created) found.set(record.cell, true);
+    return [for (cell in found.keys()) cell];
+  }
+
+  // Kayıt dosyasındaki hücre bölümü: durumlar, oyunda silinenler, oyunda kurulanlar; kimlik sırasıyla (her
+  // seferinde aynı metin). Farkı yoksa null.
+  public function cellData(cell : Int) : Null<{durumlar : Array<Dynamic>, silinenler : Array<Dynamic>, olusanlar : Array<Dynamic>}> {
+    function sorted(ids : Array<String>) {
+      ids.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
+      return ids;
+    }
+    var stateIds = sorted([for (id in states.keys()) if (cellOf(id) == cell) id]);
+    var removedIds = sorted([for (id => at in removed) if (at == cell) id]);
+    var createdIds = sorted([for (id => record in created) if (record.cell == cell) id]);
+    if (stateIds.length == 0 && removedIds.length == 0 && createdIds.length == 0) return null;
+    return {
+      durumlar: [for (id in stateIds) ({id: id, cell: cell, components: states.get(id)} : Dynamic)],
+      silinenler: [for (id in removedIds) ({id: id, cell: cell} : Dynamic)],
+      olusanlar: [for (id in createdIds) (created.get(id) : Dynamic)],
+    };
+  }
+
   public function cellOf(id : String) : Int {
     return cells.exists(id) ? cells.get(id) : GLOBAL;
   }
@@ -120,6 +164,7 @@ class WorldDelta {
   // Nesnenin Saveable bileşenlerinin farkını alır. Hiçbirinin farkı yoksa nesne listeden düşer.
   public function capture(entity : Entity) {
     if (removed.exists(entity.id)) return;
+    touch(cellOf(entity.id));
     var found : DynamicAccess<Dynamic> = {};
     var any = false;
     for (key => component in saveables(entity)) {
@@ -169,6 +214,7 @@ class WorldDelta {
         to = pairs.get(to);
       }
       // Oyunda yok edilmiş tasarlanmış nesne yeniden yapıldıysa yenisi de kurulmaz.
+      touch(cellOf(from));
       if (from != to && removed.exists(from)) {
         removed.set(to, removed.get(from));
         removed.remove(from);
@@ -218,6 +264,7 @@ class WorldDelta {
   // Bölgeyi sıfırlamak: hücrenin farkı atılır, açılınca tasarlanmış haliyle gelir. Oyuncunun olanlar (kurdukları,
   // ekip) ve hikâye ilerlemesi (çalışmış tetikleyici) kalır.
   public function forgetCell(cell : Int) {
+    touch(cell);
     for (id in [for (key in states.keys()) key]) if (cellOf(id) == cell && !survivesReset(id)) states.remove(id);
     for (id in [for (key in removed.keys()) key]) if (removed.get(id) == cell) removed.remove(id);
     for (id in [for (key in created.keys()) key]) if (created.get(id).cell == cell && created.get(id).owner != PLAYER) forgetCreated(id);

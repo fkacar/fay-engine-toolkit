@@ -17,7 +17,8 @@ class SaveSlots {
   public static inline var QUICK = "hizli";
   public static inline var AUTO = "oto";
   public static inline var IRONMAN = "ironman";
-  public static inline var AUTO_COUNT = 3;
+  // Beş dönüşümlü otomatik yuva; oyun tek zaman çizgisini kendisi korur (docs/KAYIT_PLANI.md, Otomatik kayıt yuvaları).
+  public static inline var AUTO_COUNT = 5;
   public static inline var MANUAL_LIMIT = 50;
 
   public var root(default, null) : String;
