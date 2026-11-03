@@ -10,7 +10,28 @@ class GameState {
   // İz için: tür (esya, degisken, iliski), ad, yeni değer.
   public var onChange : Null<String->String->Int->Void>;
 
+  // onChange tek kişiliktir (iz onu kullanır); kayıt günlüğü gibi başka dinleyiciler buraya eklenir.
+  var watchers : Array<String->String->Int->Void> = [];
+
   public function new() {}
+
+  public function watch(listener : String->String->Int->Void) {
+    watchers.push(listener);
+  }
+
+  // Kayıt yüklenince: bütün durum değişir, arayüz yenilenir. Dinleyicilere tek tek haber verilmez.
+  public function restore(newItems : Map<String, Int>, newFlags : Map<String, Int>, newStanding : Map<String, Int>) {
+    for (pair in [{to: items, from: newItems}, {to: flags, from: newFlags}, {to: standing, from: newStanding}]) {
+      pair.to.clear();
+      for (key => value in pair.from) pair.to.set(key, value);
+    }
+    revision++;
+  }
+
+  function changed(kind : String, name : String, value : Int) {
+    if (onChange != null) onChange(kind, name, value);
+    for (listener in watchers) listener(kind, name, value);
+  }
 
   public function count(item : String) {
     return items.exists(item) ? items.get(item) : 0;
@@ -21,7 +42,7 @@ class GameState {
     if (total <= 0) items.remove(item);
     else items.set(item, total);
     revision++;
-    if (onChange != null) onChange("esya", item, count(item));
+    changed("esya", item, count(item));
   }
 
   public function flag(name : String) {
@@ -31,7 +52,7 @@ class GameState {
   public function setFlag(name : String, value : Int) {
     flags.set(name, value);
     revision++;
-    if (onChange != null) onChange("degisken", name, value);
+    changed("degisken", name, value);
   }
 
   public function standingWith(faction : String) {
@@ -41,6 +62,6 @@ class GameState {
   public function changeStanding(faction : String, amount : Int) {
     standing.set(faction, standingWith(faction) + amount);
     revision++;
-    if (onChange != null) onChange("iliski", faction, standingWith(faction));
+    changed("iliski", faction, standingWith(faction));
   }
 }

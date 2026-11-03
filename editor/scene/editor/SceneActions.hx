@@ -66,12 +66,17 @@ class SceneActions {
     add([item], "Nesne ekle");
   }
 
-  public function remove() {
+  public function remove(confirmed = false) {
     var roots = editor.selection.roots();
     if (roots.length == 0) return;
     var removable = roots.filter(entity -> !entity.isPrefabPart);
     if (removable.length < roots.length) editor.show("Prefab parçası silinemez, prefab'ı açıp orada sil");
     if (removable.length == 0) return;
+    var released = editor.releaseIds.protectedNames(removable);
+    if (released.length > 0 && !confirmed) {
+      editor.askReleasedRemoval(released, () -> remove(true));
+      return;
+    }
     editor.commands.execute(new RemoveEntitiesCommand(editor.scene, removable));
     editor.selection.clear();
   }

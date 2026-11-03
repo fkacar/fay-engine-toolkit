@@ -8,6 +8,8 @@ typedef Issue = {
   var message : String;
   @:optional var dialog : String;
   @:optional var node : Int;
+  // Uyarının yanında düğmeler: örneğin yayındaki silinmiş nesneyi yerine geçenle eşlemek ya da bırakmak.
+  @:optional var actions : Array<{label : String, run : Void->Void}>;
 }
 
 // Kaydederken çalışır, kaydı engellemez: tasarımcı yarım işini de kaydedebilmeli.

@@ -2,6 +2,7 @@ package scene.world;
 
 import scene.Entity;
 import scene.SceneInstance;
+import scene.save.WorldDelta;
 
 // Oyunda yalnızca kameranın yakınındaki hücreler yüklü kalır. Arazi daha geniş bir halkada
 // tutulur, çünkü uzaktan da görünür. Takılma olmasın diye karede tek hücre açılır.
@@ -27,6 +28,16 @@ class CellStreamer {
     this.withObjects = withObjects;
   }
 
+  // Genel hücre ve oyunda kurulup genel hücreye bağlanan nesneler (ekibe katılanlar).
+  function loadGlobal() {
+    scene.load(state.objects(WorldData.GLOBAL));
+    var delta = scene.delta;
+    if (delta == null) return;
+    delta.locate = (x, y) -> state.data.nearest(x, y);
+    var created = delta.createdIn(WorldDelta.GLOBAL);
+    if (created.length > 0) scene.stream(created);
+  }
+
   public function isLoaded(cell : Int) {
     return loaded.exists(cell);
   }
@@ -37,7 +48,19 @@ class CellStreamer {
 
   // Başlangıçta oyun açılmadan önce hepsi birden yüklenir.
   public function start(x : Float, y : Float) {
-    if (withObjects) scene.load(state.objects(WorldData.GLOBAL));
+    if (withObjects) loadGlobal();
+    moveTo(state.data.cellAt(x, y));
+    while (waiting.length > 0) loadNext();
+  }
+
+  // Kayıt yüklenince: nesneler baştan kurulur (sahnenin fark deposu önceden değiştirilir), arazi yerinde kalır.
+  public function restart(x : Float, y : Float) {
+    for (cell in [for (key in loaded.keys()) key]) {
+      loaded.remove(cell);
+      state.unloadScatter(cell);
+    }
+    if (withObjects) loadGlobal();
+    center = WorldData.OUTSIDE;
     moveTo(state.data.cellAt(x, y));
     while (waiting.length > 0) loadNext();
   }
@@ -88,12 +111,20 @@ class CellStreamer {
 
   function loadNext() {
     var cell = waiting.shift();
-    loaded.set(cell, scene.stream(state.objects(cell).entities));
+    var items = state.objects(cell).entities;
+    // Oyunda kurulanlar; başka hücreden buraya taşınıp hâlâ açık duran nesne ikinci kez kurulmaz.
+    if (scene.delta != null) items = items.concat(scene.delta.createdIn(cell).filter(item -> scene.find(item.id) == null));
+    loaded.set(cell, scene.stream(items, cell));
     state.loadScatter(cell);
   }
 
   function unload(cell : Int) {
-    for (root in loaded.get(cell).filter(entity -> entity.parent == null)) scene.destroyEntity(root);
+    for (root in loaded.get(cell).filter(entity -> entity.parent == null && scene.contains(entity))) scene.destroyEntity(root);
+    // Oyunda kurulup şimdi bu hücrede duranlar da hücreyle kapanır (taşınanlar bulundukları yere göre).
+    var delta = scene.delta;
+    if (delta != null)
+      for (root in scene.entities.filter(entity -> entity.parent == null && delta.isCreatedRoot(entity.id) && delta.cellOf(entity.id) != WorldDelta.GLOBAL))
+        if (state.data.nearest(root.x, root.y) == cell) scene.destroyEntity(root);
     loaded.remove(cell);
     state.unloadScatter(cell);
   }

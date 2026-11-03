@@ -190,6 +190,15 @@ Yeni bir dosya türü yazan kod bu yoldan geçmelidir.
 - Takma noktaları (`ImportSettings.sockets`) `<ad>.model.json`'a yazılır; iskeletli modelde ayar yoksa Mixamo eklemlerine varsayılanlar (avuç ele bağlı köşelerden). Eksen bağlama pozundaki gövdeye göre, yönü `socketFrame`. İskeletsiz modelde yalnızca noktalar yazılır.
 - Veri tablolarında `varlik` türü: `res/` altındaki dosya yolu. `GameData.forget` tablo değişince önbelleği bırakır.
 - `Editor.requestRender` çizim karesinin içinde bir kez ekran dışı çizim yaptırır (oyunun ajan önizlemesi bununla çizer).
+- Kayıt (`scene.save`, oyunun kullandığı genel parçalar; ne saklanacağına oyun karar verir):
+  - `Saveable`: bileşen farkını verir ve geri yükler.
+  - `WorldDelta`: kapanan hücrelerin farkı. `SceneInstance.delta` atanınca `destroyEntity` farkı alır, `stream` ve `start` `onStart`'tan önce geri yükler.
+  - `SaveFile`: bölümlü, sıkıştırılmış, CRC32'li dosya; güvenli yazma ve yedek.
+  - `SaveSlots`: seferler ve yuvalar.
+  - `PlayOptions.save` (`--save`), `CellStreamer.restart`, `GameState.watch` ve `restore`.
+  - `Random`: tohumlu üretici, `hxd.Rand`'ın birebir kopyası (Heaps güncellemesi tohumdan çıkan sayıları değiştiremez; testte altın değerlerle kilitli). Kodda `Math.random`, `Std.random`, `hxd.Rand` yasak, bekçi test tarar. `RandomStreams`: seferin tohumundan adlı, kaydedilebilir akışlar.
+  - Oyunda yok etmek `SceneInstance.removeEntity` (fark kaydına "silindi"; hücre açılınca kurulmaz), oyunda kurmak `spawnEntities(veri, hücre, sahip)` (tam veri kayda girer, hücreyle açılıp kapanır). `destroyEntity` hücre kapanışı içindir, kayda "silindi" yazmaz. Kimlik `WorldDelta.newId(akış)`.
+  - `WorldDelta.remap`: kimlik eşlemesi. Editörde `ReleaseIds` yayın listesini yazar, kaybolan yayın nesnesini uyarır, yerine geçeni önerir ve `kayit_esleri` tablosuna eşler. Yayın listesi yalnızca büyür; eşlemeler zincirlenir (`ReleaseIds.resolve`, `WorldDelta.remap`), bilerek kaldırılan nesne bırakılır (`birak` sütunu). `Issue.actions` uyarının yanında düğmeler çizer.
   - Yeniden hedefleme: her eklem için rig dünya = rig dinlenme × klip dinlenmesi⁻¹ × klip dünya. Kemik boyları rigden alınır.
   - Klibin iskeleti bir okuyucudan, kareleri ayrı bir okuyucudan gelir. Heaps `loadAnimation`'ı aynı okuyucuda ikinci kez çağırınca açıları yeniden radyana çevirir.
   - Kareler `HMDOut.makeAnimation` ile yazılır.

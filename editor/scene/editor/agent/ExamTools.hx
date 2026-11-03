@@ -327,6 +327,7 @@ class ExamTools {
       story: [for (found in StoryIndex.issues(StoryIndex.build(editor))) found.message => true],
       rows: [for (name => table in editor.data.tables) name => table.ids()],
       dialogs: editor.dialogs.ids(),
+      releaseList: FileSystem.exists(ReleaseIds.PATH) ? sys.io.File.getContent(ReleaseIds.PATH) : null,
       camera: {target: orbit.lookPoint(), distance: orbit.distance, yaw: orbit.yaw, pitch: orbit.pitch},
       selection: [for (entity in editor.selection.items) entity.id],
     };
@@ -344,6 +345,11 @@ class ExamTools {
         if (saved && world != null)
           for (path in world.objectFiles()) if (base.objectFiles.indexOf(path) < 0 && world.dropEmptyObjectFile(path)) dropped.push('res/$path');
       } else note = "Görev sırasında kaydedildi; disk sınav öncesinden farklı. Kaydedersen senin halin yazılır.";
+    }
+    var releaseNow = FileSystem.exists(ReleaseIds.PATH) ? sys.io.File.getContent(ReleaseIds.PATH) : null;
+    if (releaseNow != base.releaseList) {
+      if (base.releaseList == null) FileSystem.deleteFile(ReleaseIds.PATH);
+      else sys.io.File.saveContent(ReleaseIds.PATH, base.releaseList);
     }
     var moved = [];
     var fresh = [for (name in PlayTests.list()) if (base.tests.indexOf(name) < 0) name];
@@ -411,5 +417,7 @@ typedef Baseline = {
   rows : Map<String, Array<String>>,
   dialogs : Array<String>,
   camera : {target : Vec3, distance : Float, yaw : Float, pitch : Float},
+  // Yayın listesi (res/kayit/kimlikler.json) dosya işidir, geri alma onu kapsamaz: sınav sonunda eski hali geri konur.
+  releaseList : Null<String>,
   selection : Array<String>,
 };

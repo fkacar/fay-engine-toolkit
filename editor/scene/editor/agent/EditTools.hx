@@ -53,6 +53,7 @@ class EditTools {
     tool("edit_scene", "Sahneyi değiştirir. operations sırayla uygulanır, hepsi tek geri alma adımıdır. İşlemler:\n"
       + "create {key?, name, type? (bileşen veya işaretçi kimliği, örn. spawn, patrol_route, trigger), prefab? (yol), position [x,y] veya [x,y,z], rotationDegrees?, parent? (kimlik veya $key), fields? (type bileşeninin alanları), components? [{type, fields}], waypoints? [[x,y],...] (rota işaretçisi için)}\n"
       + "set {id, name?, position?, rotationDegrees?, scale?, visibleInGame?, components? [{type, fields}]}\n"
+      + "delete yayındaki (oyunculara ulaşmış, durumlu) nesneyi silmez; bilerek silmek için allowReleased: true. Yerine yenisi yapılırsa kayit_esleri tablosuna eşle\n"
       + "add_component {id, type, fields?} · remove_component {id, type} · delete {ids}\n"
       + "Alan adı kimlik veya Inspector etiketi olabilir. Bir alan aynı çağrıda oluşturulan nesneyi \"$key\" ile gösterebilir. x,y verilince nesne sürükleyip bırakmadaki gibi zemine oturur: en alt noktası zemine değer (işaretçide z zeminden yüksekliktir). [x,y,z] verilirse z olduğu gibi yazılır.", {
       label: {type: "string", description: "Geçmişte görünecek ad, örn. kasabaya devriye"},
@@ -85,6 +86,29 @@ class EditTools {
     tool("find_path", "İki nokta arasında yürünebilir yol: noktalar, uzunluk ve hedefe varılıp varılmadığı.", {
       from: {type: "array", items: {type: "number"}}, to: {type: "array", items: {type: "number"}},
     }, args -> path(args.from, args.to), true, ["from", "to"]);
+    tool("record_release_ids", "Oyun dağıtılırken (Steam'e yükleme): dünyadaki durumlu nesnelerin (tetikleyici, doğma alanı, ekip üyesi) kimliklerini res/kayit/kimlikler.json'a yazar. "
+      + "Bundan sonra bu nesneler silinirse Uyarılar'a düşer, silerken onay sorulur. Liste yalnızca büyür: önceki yayından olup dünyadan kalkmış nesneler listede kalır, "
+      + "unresolved onlardan eşlenmemiş ve bırakılmamış olanlardır (tasarımcıya söyle, map_saved_entity ile çöz). Dosya işidir, geri alma adımı değildir. Tasarımcı istemedikçe çağırma.", {}, _ -> {
+        var recorded = editor.releaseIds.record();
+        editor.document.validate();
+        ({path: ReleaseIds.PATH, count: recorded.count, unresolved: [for (item in recorded.unresolved) {id: item.id, name: item.name, types: item.types}]} : Dynamic);
+      }, false);
+    tool("map_saved_entity", "Yayındaki silinmiş bir nesnenin oyuncu kayıtlarındaki durumunu yerine geçen nesneye bağlar (kayit_esleri tablosu, tek geri alma adımı). "
+      + "from eski kimlik (get_warnings'teki 'Yayındaki ... dünyada yok' uyarısından), to yeni nesnenin kimliği. "
+      + "Tasarımcı nesneyi bilerek kaldırdıysa ve yerine bir şey gelmeyecekse to yerine abandon: true (Bırak): uyarı kapanır, oyuncunun o nesnedeki durumu bağsız kalır. Bırakmaya tasarımcı karar verir.", {
+        from: {type: "string"}, to: {type: "string"}, abandon: {type: "boolean"},
+      }, (args : Dynamic) -> {
+        var old = Lambda.find(editor.releaseIds.list(), item -> item.id == args.from);
+        if (old == null) throw 'yayın listesinde yok: ${args.from}';
+        if ((args.abandon == true) == (args.to != null)) throw "ya to ya da abandon: true ver";
+        if (args.abandon == true) {
+          editor.releaseIds.abandon(args.from, old.name);
+          return ({abandoned: args.from, revision: editor.commands.revision} : Dynamic);
+        }
+        if (editor.scene.find(args.to) == null) throw 'yeni nesne yok veya hücresi yüklü değil: ${args.to}';
+        editor.releaseIds.map(args.from, args.to, old.name);
+        ({mapped: args.from, to: args.to, revision: editor.commands.revision} : Dynamic);
+      }, false, ["from"]);
     tool("list_models", "Modeller. models: res altındaki yerleştirilebilir modeller; model bileşeninin path alanına bu yol yazılır. notImported: assets altında olup içe aktarılmamış veya kaynağı sonradan değişmiş FBX'ler, import_model ile alınır.", {}, _ -> listModels(), true);
     server.add({name: "import_model", readOnly: false, run: importModel,
       description: "assets altındaki bir FBX'i Asset Browser'daki Model içe aktar gibi dönüştürür, res/models altına yazar. Dosya işidir, geri alma adımı değildir; yeniden alınca sahnelerdeki yol değişmez. Büyük modelde editör bir süre tepki vermez. Dönen path'i model bileşenine yaz. "
@@ -231,6 +255,11 @@ class EditTools {
         var ids : Array<String> = operation.ids;
         var entities = [for (id in ids) existing(id, created)];
         for (entity in entities) if (entity.isPrefabPart) throw 'prefab parçası silinmez, prefab\'ı aç: ${entity.name}';
+        // Yayındaki nesne: oyuncu kayıtlarında durumu var. Bilerek silinir; yerine yenisi yapılırsa eşlenir.
+        var released = editor.releaseIds.protectedNames(entities);
+        if (released.length > 0 && operation.allowReleased != true)
+          throw 'yayındaki nesne: ${released.join(", ")}. Oyuncu kayıtlarında durumu var (çalışmış tetikleyici, NPC\'ler); silinirse oyuncularda yeniden başlar. '
+            + 'Yerine yenisini yapacaksan sildikten sonra get_warnings\'teki öneriyle kayit_esleri tablosuna eşle (edit_table, satır kimliği eski kimlik, yeni sütunu yeni kimlik). Bilerek silmek için allowReleased: true';
         run(new RemoveEntitiesCommand(editor.scene, entities));
       default:
         throw 'bilinmeyen işlem: ${operation.op}. create, set, add_component, remove_component, delete';

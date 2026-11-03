@@ -27,6 +27,8 @@ class SceneInstance {
   public var warnings(default, null) : Array<String> = [];
   // Prefab dosyasının metnini verir. `res` köküne göre yol alır.
   public var prefabLoader : Null<String->String>;
+  // Oyunda: kapanan hücrelerin farkı burada tutulur, açılınca geri yüklenir (scene.save.Saveable).
+  public var delta : Null<scene.save.WorldDelta>;
 
   var prefabs = new Map<String, SceneData>();
   var isReady = false;
@@ -61,6 +63,11 @@ class SceneInstance {
   }
 
   public function destroyEntity(entity : Entity) {
+    // Oyun sürerken (hücre kapanırken) yok olan nesnenin farkı alınır: açılınca kaldığı yerden devam eder.
+    if (delta != null && hasStarted && !removing) {
+      delta.capture(entity);
+      if (delta.isCreatedRoot(entity.id)) delta.updateCreated(entity.id, createdData(entity), cellAt(entity));
+    }
     for (child in entity.children.copy()) destroyEntity(child);
     for (component in entity.components) destroyComponent(component);
     entity.setParent(null);
@@ -138,7 +145,11 @@ class SceneInstance {
     var created = [];
     var flat = [];
     for (item in items) {
+      // Oyunda yok edilmiş tasarlanmış nesne hücre açılınca kurulmaz.
+      if (delta != null && delta.isRemoved(item.id)) continue;
       var entries = item.prefab == null ? null : expandPrefab(item);
+      if (entries != null && delta != null) entries = entries.filter(entry -> !delta.isRemoved(entry.data.id));
+      if (entries != null && entries.length == 0) continue;
       if (entries == null) {
         var entity = spawn(item);
         // Açılamayan instance sahnede kalır, kayıtta yolu ve farkları korunur.
@@ -268,16 +279,76 @@ class SceneInstance {
     return result;
   }
 
+  var removing = false;
+
+  // Oyunda yok etmek (eşya alındı, bina yıkıldı): fark kaydına "silindi" yazılır, hücre açılınca kurulmaz.
+  // Hücre kapanırken nesneler destroyEntity ile kaldırılır; o, farkı saklar.
+  public function removeEntity(entity : Entity) {
+    if (delta != null) {
+      var ids = [];
+      function collect(item : Entity) {
+        ids.push(item.id);
+        for (child in item.children) collect(child);
+      }
+      collect(entity);
+      delta.markRemoved(ids);
+    }
+    removing = true;
+    destroyEntity(entity);
+    removing = false;
+  }
+
+  // Oyunda kurmak (bırakılan eşya, inşa, ekibe katılan): tam verisi fark kaydına girer, hücresine bağlanır;
+  // hücre açılınca kurulur, kapanınca kaydedilip kaldırılır. Kimlikleri veren çağıran (WorldDelta.newId).
+  public function spawnEntities(data : SceneData, cell : Int, owner = "") : Array<Entity> {
+    var created = instantiate(data.entities);
+    if (delta != null) {
+      for (entity in created) delta.placeIn(entity, cell);
+      for (entity in created) if (entity.parent == null) delta.recordCreated(entity.id, createdData(entity), cell, owner);
+    }
+    if (hasStarted) for (entity in created) for (component in entity.components) component.onStart();
+    return created;
+  }
+
+  // Dünyadaki noktanın hücresi (spawnEntities için); dünya yoksa genel.
+  public function cellFor(x : Float, y : Float) : Int {
+    return delta == null || delta.locate == null ? scene.save.WorldDelta.GLOBAL : delta.locate(x, y);
+  }
+
+  // Kayıt için: açık nesnelerin farkı ve oyunda kurulanların güncel hali (yeri, hücresi).
+  public function captureDelta() {
+    if (delta == null) return;
+    for (entity in entities) {
+      delta.capture(entity);
+      if (delta.isCreatedRoot(entity.id)) delta.updateCreated(entity.id, createdData(entity), cellAt(entity));
+    }
+  }
+
+  function createdData(root : Entity) : Dynamic {
+    return haxe.Json.parse(SceneFormat.write(toDataOf([root])));
+  }
+
+  function cellAt(root : Entity) : Int {
+    if (delta.cellOf(root.id) == scene.save.WorldDelta.GLOBAL || delta.locate == null) return delta.cellOf(root.id);
+    return delta.locate(root.x, root.y);
+  }
+
   public function start() {
     if (mode != Game) return;
     hasStarted = true;
-    for (entity in entities.copy()) for (component in entity.components) component.onStart();
+    var all = entities.copy();
+    if (delta != null) for (entity in all) delta.restore(entity);
+    for (entity in all) for (component in entity.components) component.onStart();
   }
 
-  // Oyun sürerken gelen hücre: nesneler başlangıcı kaçırmasın.
-  public function stream(items : Array<EntityData>) : Array<Entity> {
+  // Oyun sürerken gelen hücre: nesneler başlangıcı kaçırmasın. Kayıtlı farkları başlamadan önce yüklenir.
+  public function stream(items : Array<EntityData>, cell = scene.save.WorldDelta.GLOBAL) : Array<Entity> {
     var created = instantiate(items);
-    if (hasStarted) for (entity in created) for (component in entity.components) component.onStart();
+    if (delta != null) for (entity in created) delta.placeIn(entity, cell);
+    if (hasStarted) {
+      if (delta != null) for (entity in created) delta.restore(entity);
+      for (entity in created) for (component in entity.components) component.onStart();
+    }
     return created;
   }
 

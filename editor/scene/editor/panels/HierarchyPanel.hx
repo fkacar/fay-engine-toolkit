@@ -153,7 +153,7 @@ class HierarchyPanel {
     if (entity.prefab == null && !entity.isPrefabPart && ImGui.menuItem("Prefab yap")) editor.askPrefabName();
     if (ImGui.menuItem("Alt nesne ekle")) deferred.push(() -> actions.createEmpty(entity));
     if (ImGui.menuItem("Çoğalt", editor.commandName + "+D")) deferred.push(actions.duplicate);
-    if (ImGui.menuItem("Sil", "Del")) deferred.push(actions.remove);
+    if (ImGui.menuItem("Sil", "Del")) deferred.push(() -> actions.remove());
     ImGui.endPopup();
   }
 

@@ -159,6 +159,25 @@ class NeedFlag extends TriggerCondition {
   }
 }
 
+// Oyunda sayılan, editörde görünmeyen durum: hücre kapanıp açılınca korunmalı, onStart'tan önce yüklenmeli.
+@:component("sayac")
+class Counter extends Component implements scene.save.Saveable {
+  public var hits = 0;
+  public var seenAtStart = -1;
+
+  override function onStart() {
+    seenAtStart = hits;
+  }
+
+  public function saveState() : Null<Dynamic> {
+    return hits == 0 ? null : {hits: hits};
+  }
+
+  public function loadState(state : Dynamic) {
+    hits = state.hits;
+  }
+}
+
 @:component("traveller")
 class Traveller extends Component {
   public var at = 0.;
@@ -1196,6 +1215,244 @@ class TestMain {
     check(!terrain.contains(41, 0), "dünyanın dışı");
   }
 
+  // Kayıt rastgele üretilenleri saklamaz, aynı tohumdan yeniden üretir: bu sayılar değişirse eski kayıtlardaki
+  // NPC'ler başka görünür, kayalar yer değiştirir. Değerler Heaps 2.1 hxd.Rand'ından alındı (birebir kopya).
+  static function testRandom() {
+    var golden : Array<{seed : Int, hash : Int, ints : Array<Int>, rand : Float, srand : Float}> = [
+      {seed: 0, hash: 42090530, ints: [841378, 391997, 847051, 133730], rand: 0.308883781353053, srand: -0.685819926051764},
+      {seed: 1, hash: 1695882760, ints: [726613, 781775, 326192, 838364], rand: 0.578694913560508, srand: 0.468172279404417},
+      {seed: 12345, hash: 665828368, ints: [93295, 663511, 350720, 389937], rand: 0.00919356450484661, srand: -0.741381033276706},
+      {seed: -7, hash: 2135320727, ints: [183542, 926618, 403958, 316073], rand: 0.0224842610172879, srand: -0.50314779654242},
+    ];
+    for (g in golden) {
+      var r = new scene.save.Random(g.seed);
+      equals(scene.save.Random.hash(g.seed), g.hash, 'karma ${g.seed}');
+      equals([for (_ in 0...4) r.random(1000000)].join(","), g.ints.join(","), 'tam sayılar ${g.seed}');
+      check(Math.abs(r.rand() - g.rand) < 1e-12, 'rand ${g.seed}');
+      check(Math.abs(r.srand() - g.srand) < 1e-12, 'srand ${g.seed}');
+    }
+    equals(scene.save.Random.textSeed("2f37e6920111c0d0:0"), 1690738351, "görünüş tohumu (FNV-1a)");
+    equals(scene.save.Random.layoutSeed("2f37e6920111c0d0"), 5915597, "doğma alanı yerleşim tohumu");
+
+    var streams = new scene.save.RandomStreams(424242);
+    var loot = streams.get("ganimet");
+    for (_ in 0...5) loot.rand();
+    streams.get("dovus").rand();
+    var copy = scene.save.RandomStreams.fromData(haxe.Json.parse(haxe.Json.stringify(streams.toData())));
+    equals(copy.get("ganimet").random(1000000), streams.get("ganimet").random(1000000), "akış kayıttan aynı noktadan sürmeli");
+    var fresh = new scene.save.RandomStreams(424242);
+    fresh.get("dovus");
+    var first = fresh.get("ganimet").random(1000000);
+    equals(new scene.save.RandomStreams(424242).get("ganimet").random(1000000), first, "bir akışa çekiliş eklemek ötekini kaydırmamalı");
+
+    // Bekçi: oyun ve araç takımı kodunda tohumsuz rastgelelik yok. İstisnalar: editörün kimlik üretimi, sefer kimliği.
+    var allowed = ["Guid.hx", "SaveSlots.hx"];
+    var banned = ~/Math\.random|Std\.random|hxd\.Rand/;
+    var found = [];
+    function scan(dir : String) {
+      for (name in sys.FileSystem.readDirectory(dir)) {
+        var path = '$dir/$name';
+        if (sys.FileSystem.isDirectory(path)) scan(path);
+        else if (StringTools.endsWith(name, ".hx") && allowed.indexOf(name) < 0)
+          for (line in sys.io.File.getContent(path).split("\n")) {
+            var code = line.indexOf("//") >= 0 ? line.substr(0, line.indexOf("//")) : line;
+            if (banned.match(code)) found.push('$path: ${StringTools.trim(line)}');
+          }
+      }
+    }
+    var roots = ["libs/scene-toolkit/runtime", "runtime", "src"].filter(dir -> sys.FileSystem.exists(dir) && sys.FileSystem.isDirectory(dir));
+    check(roots.length > 0, "taranacak kod klasörü bulunmalı");
+    for (dir in roots) scan(dir);
+    equals(found.join(" | "), "", "tohumsuz rastgelelik (scene.save.Random kullan)");
+  }
+
+  // Oyunda silinen ve oyunda kurulan nesneler: dirilme, kaybolma, hücre sızıntısı olmamalı.
+  static function testRuntimeEntities() {
+    var world = new WorldData("world", 5, 1, 10, 2, []);
+    var files = new Map<String, String>();
+    for (cell in world.cells()) {
+      var data = new SceneData(SceneFormat.VERSION);
+      var item = new EntityData("n" + cell, "Sayaç " + cell);
+      item.components.push(new ComponentData("sayac"));
+      data.entities.push(item);
+      files.set(world.path(cell, WorldData.OBJECTS_SUFFIX), SceneFormat.write(data));
+    }
+    var types = registry();
+    types.register(Counter);
+    function made(id : String, x : Float) {
+      var data = new SceneData(SceneFormat.VERSION);
+      var item = new EntityData(id, "Kulübe " + id);
+      item.position = [x, 0, 0];
+      item.components.push(new ComponentData("sayac"));
+      data.entities.push(item);
+      return data;
+    }
+    function open(delta : scene.save.WorldDelta) {
+      var game = new SceneInstance(types, Game, new Object());
+      game.delta = delta;
+      var streamer = new CellStreamer(new WorldState(world, path -> files.get(path)), game, true);
+      streamer.objectRadius = 0;
+      streamer.start(world.cellLeft(0) + 1, 0);
+      game.start();
+      return {game: game, streamer: streamer};
+    }
+    var delta = new scene.save.WorldDelta();
+    var run = open(delta), game = run.game, streamer = run.streamer;
+    var far = world.cellLeft(4) + 1, home = world.cellLeft(0) + 1;
+
+    game.removeEntity(game.find("n0"));
+    check(game.find("n0") == null && delta.isRemoved("n0"), "oyunda silinen nesne gitmeli, işaretlenmeli");
+    game.spawnEntities(made("o1", world.cellLeft(0) + 3), 0, scene.save.WorldDelta.PLAYER);
+    game.find("o1").getComponent(Counter).hits = 4;
+    var moving = game.spawnEntities(made("o2", world.cellLeft(0) + 4), 0)[0];
+    moving.setPosition(world.cellLeft(4) + 3, 0, 0);
+    streamer.update(far, 0);
+    check(game.find("o1") == null, "oyunda kurulan nesne hücreyle kapanmalı (sızıntı yok)");
+    check(game.find("o2") != null, "başka hücreye taşınan nesne eski hücreyle kapanmamalı");
+    equals(game.entities.filter(e -> e.id == "o2").length, 1, "taşınan nesne yeni hücresinde ikinci kez kurulmamalı");
+    streamer.update(home, 0);
+    check(game.find("n0") == null, "silinen nesne hücre açılınca dirilmemeli");
+    var hut = game.find("o1");
+    check(hut != null && hut.getComponent(Counter).hits == 4 && hut.getComponent(Counter).seenAtStart == 4, "kurulan nesne durumuyla geri gelmeli");
+
+    // Dosyaya yazılıp yeni bir sahnede açılınca aynı dünya.
+    game.captureDelta();
+    var text = haxe.Json.stringify({states: delta.toData(), removed: delta.removedList(), created: delta.createdList()});
+    var saved : Dynamic = haxe.Json.parse(text);
+    var copy = open(scene.save.WorldDelta.fromData(saved.states, saved.removed, saved.created));
+    check(copy.game.find("n0") == null && copy.game.find("o1") != null && copy.game.find("o1").getComponent(Counter).hits == 4, "kayıttan açılınca silinen yok, kurulan durumuyla var");
+    check(copy.game.find("o2") == null, "taşınan nesne yeni hücresinde, o hücre kapalıyken kurulmaz");
+    copy.streamer.update(far, 0);
+    check(copy.game.find("o2") != null, "taşınan nesne yeni hücresi açılınca gelmeli");
+
+    // Oyunda kurulan nesneyi yok etmek kayıttan tamamen düşürür; bölge sıfırlama oyuncununkini korur.
+    game.removeEntity(game.find("o1"));
+    check(!delta.isCreated("o1"), "yok edilen kurulan nesne kayıttan düşmeli");
+    game.spawnEntities(made("o3", world.cellLeft(0) + 5), 0);
+    game.spawnEntities(made("o4", world.cellLeft(0) + 6), 0, scene.save.WorldDelta.PLAYER);
+    streamer.update(far, 0);
+    delta.forgetCell(0);
+    check(!delta.isCreated("o3") && delta.isCreated("o4") && !delta.isRemoved("n0"), "bölge sıfırlanınca dünyanınki gider, oyuncununki kalır, silinen geri gelir");
+    streamer.update(home, 0);
+    check(game.find("n0") != null && game.find("o4") != null && game.find("o3") == null, "sıfırlanan bölge tasarlanmış hali ve oyuncunun kurduklarıyla");
+
+    // Genel hücreye kurulan (ekibe katılan) her zaman yüklü, kayıttan açılışta gelir.
+    game.spawnEntities(made("o5", 0), scene.save.WorldDelta.GLOBAL, scene.save.WorldDelta.PLAYER);
+    game.captureDelta();
+    var again : Dynamic = haxe.Json.parse(haxe.Json.stringify({states: delta.toData(), removed: delta.removedList(), created: delta.createdList()}));
+    var third = open(scene.save.WorldDelta.fromData(again.states, again.removed, again.created));
+    check(third.game.find("o5") != null, "genel hücredeki kurulan nesne açılışta gelmeli");
+    var ids = [for (_ in 0...3) scene.save.WorldDelta.newId(new scene.save.Random(9))];
+    check(ids[0] == ids[1] && StringTools.startsWith(ids[0], "o") && ids[0].length == 16, 'kurulan nesne kimliği akıştan, aynı tohumla aynı: ${ids[0]}');
+  }
+
+  static function testSaveFiles() {
+    var sections = [scene.save.SaveFile.section("meta", {format: 1, name: "Sefer ş"}), {name: "bos", data: haxe.io.Bytes.alloc(0)}];
+    var bytes = scene.save.SaveFile.encode(sections);
+    var read = scene.save.SaveFile.decode(bytes);
+    equals(scene.save.SaveFile.json(read, "meta").name, "Sefer ş", "bölüm okunmalı");
+    equals(read.get("bos").length, 0, "boş bölüm okunmalı");
+    var broken = bytes.sub(0, bytes.length);
+    broken.set(10, broken.get(10) ^ 0xFF);
+    check(try { scene.save.SaveFile.decode(broken); false; } catch (e : Dynamic) Std.string(e).indexOf("bozuk") >= 0, "bozuk dosya fark edilmeli");
+
+    // Geçici klasör: yalnızca bu testin yazdığı dosyalar silinir.
+    var base = Sys.getEnv("TMPDIR");
+    var dir = (base == null ? "/tmp" : base) + "/kayit_testi_" + Std.random(1000000000);
+    var slots = new scene.save.SaveSlots(dir);
+    equals(slots.campaigns().length, 0, "klasör yokken sefer yok");
+    var campaign = slots.createCampaign("Deneme", true, "0.1");
+    equals(slots.campaigns()[0].ironman, true, "sefer okunmalı");
+    var quick = slots.pathFor(campaign.id, scene.save.SaveSlots.QUICK);
+    scene.save.SaveFile.writeSafely(quick, bytes);
+    scene.save.SaveFile.writeSafely(quick, scene.save.SaveFile.encode([scene.save.SaveFile.section("meta", {format: 1, name: "ikinci"})]));
+    check(sys.FileSystem.exists(quick + scene.save.SaveFile.BACKUP_SUFFIX), "eski kayıt yedek olmalı");
+    check(!sys.FileSystem.exists(quick + scene.save.SaveFile.TEMP_SUFFIX), "geçici dosya kalmamalı");
+    sys.io.File.saveBytes(quick, broken);
+    var safe = scene.save.SaveFile.readSafely(quick);
+    check(safe.fromBackup && scene.save.SaveFile.json(safe.sections, "meta").name == "Sefer ş", "bozuksa yedek açılmalı");
+    var autos = [for (i in 0...4) {
+      var path = slots.pathFor(campaign.id, scene.save.SaveSlots.AUTO);
+      sys.io.File.saveBytes(path, bytes);
+      path;
+    }];
+    equals(autos[3], autos[0], "dördüncü otomatik kayıt en eskinin yerine");
+    equals(slots.saves(campaign.id).filter(e -> e.kind == scene.save.SaveSlots.AUTO).length, 3, "üç otomatik yuva");
+    equals(scene.save.SaveSlots.kindOf("elle_2026-11-03_120000.kayit"), scene.save.SaveSlots.MANUAL, "elle kayıt türü");
+    for (name in sys.FileSystem.readDirectory('$dir/${campaign.id}')) sys.FileSystem.deleteFile('$dir/${campaign.id}/$name');
+    sys.FileSystem.deleteDirectory('$dir/${campaign.id}');
+    sys.FileSystem.deleteDirectory(dir);
+  }
+
+  static function testWorldDelta() {
+    var world = new WorldData("world", 5, 1, 10, 2, []);
+    var files = new Map<String, String>();
+    for (cell in world.cells()) {
+      var data = new SceneData(SceneFormat.VERSION);
+      var item = new EntityData("n" + cell, "Sayaç " + cell);
+      item.components.push(new ComponentData("sayac"));
+      data.entities.push(item);
+      files.set(world.path(cell, WorldData.OBJECTS_SUFFIX), SceneFormat.write(data));
+    }
+    var types = registry();
+    types.register(Counter);
+    var game = new SceneInstance(types, Game, new Object());
+    var delta = new scene.save.WorldDelta();
+    game.delta = delta;
+    var streamer = new CellStreamer(new WorldState(world, path -> files.get(path)), game, true);
+    streamer.objectRadius = 0;
+    streamer.start(world.cellLeft(0) + 1, 0);
+    game.start();
+    var counter = game.find("n0").getComponent(Counter);
+    counter.hits = 3;
+    streamer.update(world.cellLeft(4) + 1, 0);
+    check(game.find("n0") == null, "uzak hücre kapanmalı");
+    equals(delta.size(), 1, "kapanan hücrenin farkı alınmalı");
+    equals(delta.cellOf("n0"), 0, "farkın hücresi bilinmeli");
+    equals(delta.stateOf("n4"), null, "değişmeyen nesnenin farkı olmamalı");
+    streamer.update(world.cellLeft(0) + 1, 0);
+    var back = game.find("n0").getComponent(Counter);
+    check(back != counter, "hücre yeniden kurulmalı");
+    equals(back.hits, 3, "durum geri gelmeli");
+    equals(back.seenAtStart, 3, "durum onStart'tan önce yüklenmeli");
+
+    var text = haxe.Json.stringify(delta.toData());
+    var copy = scene.save.WorldDelta.fromData(haxe.Json.parse(text));
+    equals(haxe.Json.stringify(copy.toData()), text, "fark dosyaya yazılıp aynen okunmalı");
+    equals(copy.cellOf("n0"), 0, "hücre bilgisi okunmalı");
+
+    back.hits = 0;
+    streamer.update(world.cellLeft(4) + 1, 0);
+    equals(delta.size(), 0, "farkı kalmayan nesne listeden düşmeli");
+    back = null;
+    streamer.update(world.cellLeft(0) + 1, 0);
+    game.find("n0").getComponent(Counter).hits = 5;
+    streamer.update(world.cellLeft(4) + 1, 0);
+    delta.forgetCell(0);
+    equals(delta.size(), 0, "bölge sıfırlanınca farkı atılmalı");
+    streamer.update(world.cellLeft(0) + 1, 0);
+    equals(game.find("n0").getComponent(Counter).hits, 0, "sıfırlanan bölge tasarlanmış haliyle gelmeli");
+
+    // Dünyada artık olmayan nesnenin farkı (tasarımcı sildi) kayıtlar boyunca korunur: sonradan bir eşleme kurtarabilir.
+    var orphan = scene.save.WorldDelta.fromData(haxe.Json.parse('[{"id": "silinmis", "cell": 2, "components": {"sayac": {"hits": 7}}}]'));
+    game.delta = orphan;
+    orphan.captureAll(game.entities);
+    var kept : Dynamic = orphan.stateOf("silinmis");
+    equals(kept == null ? -1 : kept.sayac.hits, 7, "yetim fark kayıtta kalmalı");
+    equals(scene.save.WorldDelta.fromData(haxe.Json.parse(haxe.Json.stringify(orphan.toData()))).cellOf("silinmis"), 2, "yetim fark dosyaya da yazılmalı");
+    equals(orphan.remap(["silinmis" => "yenisi"]), 1, "eşleme farkı taşımalı");
+    var moved : Dynamic = orphan.stateOf("yenisi");
+    check(moved != null && moved.sayac.hits == 7 && orphan.stateOf("silinmis") == null && orphan.cellOf("yenisi") == 2, "eski kimliğin durumu ve hücresi yeniye geçmeli");
+    // İkinci yayında yenisi de silinip başkasına eşlendi: ilk sürümden kalan kayıt zincirin sonuna gider; döngü takılmaz.
+    var first = scene.save.WorldDelta.fromData(haxe.Json.parse('[{"id": "a", "cell": 2, "components": {"sayac": {"hits": 3}}}]'));
+    equals(first.remap(["b" => "c", "a" => "b"]), 1, "zincirli eşleme");
+    var chained : Dynamic = first.stateOf("c");
+    check(chained != null && chained.sayac.hits == 3 && first.stateOf("a") == null && first.stateOf("b") == null, "A→B→C: A'nın durumu C'ye");
+    var loop = scene.save.WorldDelta.fromData(haxe.Json.parse('[{"id": "x", "cell": 2, "components": {"sayac": {"hits": 1}}}]'));
+    loop.remap(["x" => "y", "y" => "x"]);
+    check(true, "döngülü eşleme takılmamalı");
+  }
+
   static function testStreaming() {
     var world = new WorldData("world", 5, 1, 10, 2, []);
     var files = new Map<String, String>();
@@ -2040,6 +2297,10 @@ class TestMain {
     testNavRules();
     testSurfaces();
     testDataTables();
+    testWorldDelta();
+    testSaveFiles();
+    testRandom();
+    testRuntimeEntities();
     testSockets();
     testStory();
     testDialogLayout();

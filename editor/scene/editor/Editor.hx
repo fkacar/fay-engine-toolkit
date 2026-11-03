@@ -53,6 +53,7 @@ class Editor {
   static inline var SAVE_AS_POPUP = "Farklı kaydet";
   static inline var RECOVERY_POPUP = "Otomatik yedek";
   static inline var PREFAB_POPUP = "Prefab yap";
+  static inline var RELEASED_POPUP = "Yayındaki nesneyi sil";
   static inline var DOCK_SPACE_NODE = 1 << 10;
   static inline var NOTICE_SECONDS = 2.5;
   static inline var NOTICE_MARGIN = 12;
@@ -69,6 +70,7 @@ class Editor {
   public var selection(default, null) = new Selection();
   public var groups(default, null) = new LockGroups();
   public var validator(default, null) : Validator;
+  public var releaseIds(default, null) : ReleaseIds;
   public var document(default, null) : SceneDocument;
   public var actions(default, null) : SceneActions;
   public var viewport(default, null) : Viewport;
@@ -120,6 +122,9 @@ class Editor {
   var openSaveAsPopup = false;
   var saveAsName = "";
   var openPrefabPopup = false;
+  // Yayındaki nesneyi silmeden önce onay: oyuncu kayıtlarındaki durumu kaybolur.
+  var releasedRemoval : Null<{names : Array<String>, confirm : Void->Void}>;
+  var openReleasedPopup = false;
   var prefabName = "";
 
   // Dünya verilirse `path` dünya dosyasını gösterir ve editör onunla açılır.
@@ -145,6 +150,8 @@ class Editor {
     if (world != null) scene.provide(NavWorld, new NavWorld(world));
     document = new SceneDocument(this, scene, path, world);
     validator.rules.push(_ -> document.prefabRootIssues());
+    releaseIds = new ReleaseIds(this);
+    validator.rules.push(_ -> releaseIds.issues());
     validator.isPartial = () -> document.world != null && !document.world.isComplete();
     if (document.prefs.layoutVersion != LAYOUT_VERSION) layoutPending = true;
     actions = new SceneActions(this);
@@ -250,6 +257,11 @@ class Editor {
     else groups.lock(items);
     document.rememberFlags();
     show(locked ? "Kilit açıldı" : '${items.length} nesne kilitlendi');
+  }
+
+  public function askReleasedRemoval(names : Array<String>, confirm : Void->Void) {
+    releasedRemoval = {names: names, confirm: confirm};
+    openReleasedPopup = true;
   }
 
   public function askPrefabName() {
@@ -565,6 +577,14 @@ class Editor {
     }
     if (ImGui.beginMenu("Oyun")) {
       if (ImGui.menuItem("Buradan oyna", "F5", false, !session.isRunning)) play();
+      // Oyun dağıtılırken: oyunculara ulaşan durumlu nesneler korunmaya başlar (silinince uyarı, eşleme).
+      if (ImGui.menuItem("Yayın kimliklerini kaydet")) {
+        var recorded = releaseIds.record();
+        document.validate();
+        var open = recorded.unresolved.length;
+        show('Yayın listesi yazıldı: ${recorded.count} durumlu nesne (${ReleaseIds.PATH})'
+          + (open > 0 ? '. $open yayın nesnesi dünyada yok, listede kaldı: Uyarılar\'da eşle ya da bırak' : ''));
+      }
       if (ImGui.beginMenu("Görev testleri")) {
         var tests = PlayTests.list();
         if (tests.length == 0) ImGui.textDisabled('Test yok: ${PlayFiles.TESTS} altına .test.json yaz');
@@ -638,6 +658,10 @@ class Editor {
     if (openDirtyPopup) ImGui.openPopup(DIRTY_POPUP);
     if (openSaveAsPopup) ImGui.openPopup(SAVE_AS_POPUP);
     if (openPrefabPopup) ImGui.openPopup(PREFAB_POPUP);
+    if (openReleasedPopup) {
+      ImGui.openPopup(RELEASED_POPUP);
+      openReleasedPopup = false;
+    }
     if (document.hasRecovery && !ImGui.isPopupOpen(RECOVERY_POPUP)) ImGui.openPopup(RECOVERY_POPUP);
     openDirtyPopup = false;
     openSaveAsPopup = false;
@@ -674,6 +698,23 @@ class Editor {
       if (ImGui.button("Oluştur") && actions.makePrefab(prefabName)) ImGui.closeCurrentPopup();
       ImGui.sameLine();
       if (ImGui.button("Vazgeç")) ImGui.closeCurrentPopup();
+      ImGui.endPopup();
+    }
+
+    if (ImGui.beginPopupModal(RELEASED_POPUP, null, flags)) {
+      var names = releasedRemoval == null ? [] : releasedRemoval.names;
+      ImGui.text('Yayındaki nesne: ${names.join(", ")}');
+      ImGui.textWrapped("Oyuncuların kayıtlarında durumu var (çalışmış tetikleyici, NPC'ler). Silip yeniden yaparsan oyuncularda yeniden başlar. Yerine yenisini yaparsan Uyarılar'dan eşle.");
+      if (ImGui.button("Yine de sil")) {
+        if (releasedRemoval != null) releasedRemoval.confirm();
+        releasedRemoval = null;
+        ImGui.closeCurrentPopup();
+      }
+      ImGui.sameLine();
+      if (ImGui.button("Vazgeç")) {
+        releasedRemoval = null;
+        ImGui.closeCurrentPopup();
+      }
       ImGui.endPopup();
     }
 
@@ -751,6 +792,10 @@ class Editor {
     if (document.warningCount() == 0 && messages.length == 0) ImGui.textDisabled("Uyarı yok");
     for (i in 0...document.issues.length) {
       var issue = document.issues[i];
+      if (issue.actions != null) for (action in issue.actions) {
+        if (ImGui.smallButton(action.label + "##eylem" + i)) action.run();
+        ImGui.sameLine();
+      }
       if (!ImGui.selectable(issue.message + "##" + i)) continue;
       if (issue.dialog != null) dialogWorkspace.open(issue.dialog, issue.node == null ? 0 : issue.node);
       if (issue.entity == null || !scene.contains(issue.entity)) continue;
