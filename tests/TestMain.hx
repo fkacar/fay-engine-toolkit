@@ -1346,6 +1346,52 @@ class TestMain {
     check(ids[0] == ids[1] && StringTools.startsWith(ids[0], "o") && ids[0].length == 16, 'kurulan nesne kimliği akıştan, aynı tohumla aynı: ${ids[0]}');
   }
 
+  // Göç zinciri, içerik izi, dünya dizini.
+  static function testSaveVersions() {
+    var migrations = new scene.save.Migrations(3);
+    migrations.add(1, "bir", sections -> sections.set("iz", [1]));
+    migrations.add(2, "iki", sections -> {
+      var trail : Array<Int> = sections.get("iz");
+      trail.push(2);
+    });
+    var sections = new Map<String, Dynamic>();
+    var applied = migrations.run(sections, 1);
+    check(applied.length == 2 && applied[0] == "1 → 2: bir" && (sections.get("iz") : Array<Int>).join(",") == "1,2", 'göçler sırayla: $applied');
+    equals(migrations.run(new Map(), 3).length, 0, "güncel kayıtta göç yok");
+    check(try { migrations.run(new Map(), 4); false; } catch (e : Dynamic) Std.string(e).indexOf("yeni bir sürüm") >= 0, "yeni biçim reddedilmeli");
+    var gap = new scene.save.Migrations(3);
+    gap.add(2, "iki", _ -> {});
+    check(try { gap.run(new Map(), 1); false; } catch (e : Dynamic) Std.string(e).indexOf("göçü yok") >= 0, "eksik adım hata vermeli");
+    check(try { gap.add(3, "fazla", _ -> {}); false; } catch (e : Dynamic) true, "en son biçimden göç eklenemez");
+
+    var world = new WorldData("world", 2, 1, 10, 2, []);
+    var files = new Map<String, String>();
+    function cellFile(ids : Array<String>, type : String) {
+      var data = new SceneData(SceneFormat.VERSION);
+      for (id in ids) {
+        var item = new EntityData(id, "Ad " + id);
+        item.components.push(new ComponentData(type));
+        data.entities.push(item);
+      }
+      return SceneFormat.write(data);
+    }
+    files.set(world.path(WorldData.GLOBAL, WorldData.OBJECTS_SUFFIX), cellFile(["ekip1"], "sayac"));
+    files.set(world.path(0, WorldData.OBJECTS_SUFFIX), cellFile(["t1", "t2"], "sayac"));
+    files.set(world.path(1, WorldData.OBJECTS_SUFFIX), cellFile(["t3"], "baska"));
+    files.set("data/esyalar.table.json", "{}");
+    var read = path -> files.get(path);
+    var before = scene.save.ContentPrint.compute(world, ["esyalar", "yok"], read);
+    check(before.cells.exists("genel") && before.cells.exists("0") && before.tables.exists("esyalar") && !before.tables.exists("yok"), "içerik izi hücre ve tablo");
+    var saved : Dynamic = haxe.Json.parse(haxe.Json.stringify(before));
+    files.set(world.path(1, WorldData.OBJECTS_SUFFIX), cellFile(["t3", "t4"], "baska"));
+    var diff = scene.save.ContentPrint.diff(saved, scene.save.ContentPrint.compute(world, ["esyalar"], read));
+    check(diff != null && diff.cells.join(",") == "1" && diff.tables.length == 0, 'değişen hücre bulunmalı: ${haxe.Json.stringify(diff)}');
+    check(scene.save.ContentPrint.diff(null, before) == null, "izi olmayan eski kayıt");
+    var index = scene.save.WorldIndex.build(world, read, _ -> null);
+    check(index.exists("ekip1") && index.exists("t4") && !index.exists("silinmis"), "dünya dizini");
+    equals(index.candidates(0, "sayac").length, 2, "aynı hücrede aynı türden adaylar");
+  }
+
   static function testSaveFiles() {
     var sections = [scene.save.SaveFile.section("meta", {format: 1, name: "Sefer ş"}), {name: "bos", data: haxe.io.Bytes.alloc(0)}];
     var bytes = scene.save.SaveFile.encode(sections);
@@ -1377,6 +1423,29 @@ class TestMain {
       path;
     }];
     equals(autos[3], autos[0], "dördüncü otomatik kayıt en eskinin yerine");
+    // Sefer araçları: en yeni kayıt, boyut, bitmiş sefer, silme, başka kökten kopya.
+    equals(slots.latestOverall() == null ? "" : slots.latestOverall().campaign, campaign.id, "devam et en yeni kaydı bulmalı");
+    check(slots.campaignSize(campaign.id) > 0 && slots.campaignSize("yok") == 0, "sefer boyutu");
+    var manualPath = slots.pathFor(campaign.id, scene.save.SaveSlots.MANUAL);
+    sys.io.File.saveBytes(manualPath, bytes);
+    var manual = slots.oldestManual(campaign.id);
+    check(manual != null && manual.path == manualPath, "en eski elle kayıt");
+    slots.deleteSave(manual);
+    check(!sys.FileSystem.exists(manualPath) && slots.oldestManual(campaign.id) == null, "elle kayıt silinmeli");
+    check(try { slots.deleteSave({path: dir + "/baska.txt", kind: "elle", modified: 0, campaign: campaign.id}); false; } catch (e : Dynamic) true, "sefer dışı yol silinmemeli");
+    var other = new scene.save.SaveSlots(dir + "_hesap");
+    equals(other.missingFrom(slots).length, 1, "hesapta olmayan sefer");
+    check(other.copyCampaign(slots, campaign.id) && other.saves(campaign.id).length == slots.saves(campaign.id).length, "sefer kopyalanmalı");
+    check(!sys.FileSystem.exists('${other.root}/${campaign.id}/${scene.save.SaveSlots.QUICK}.kayit${scene.save.SaveFile.BACKUP_SUFFIX}'), "yedek kopyalanmamalı");
+    check(!other.copyCampaign(slots, campaign.id) && other.missingFrom(slots).length == 0, "ikinci kopya olmamalı");
+    var ended = slots.campaign(campaign.id);
+    ended.ended = true;
+    ended.result = "Ekip tükendi";
+    slots.updateCampaign(ended);
+    check(slots.campaign(campaign.id).ended == true && slots.latestOverall() == null, "bitmiş sefer devam edilmez");
+    for (name in sys.FileSystem.readDirectory('${other.root}/${campaign.id}')) sys.FileSystem.deleteFile('${other.root}/${campaign.id}/$name');
+    sys.FileSystem.deleteDirectory('${other.root}/${campaign.id}');
+    sys.FileSystem.deleteDirectory(other.root);
     equals(slots.saves(campaign.id).filter(e -> e.kind == scene.save.SaveSlots.AUTO).length, 3, "üç otomatik yuva");
     equals(scene.save.SaveSlots.kindOf("elle_2026-11-03_120000.kayit"), scene.save.SaveSlots.MANUAL, "elle kayıt türü");
     for (name in sys.FileSystem.readDirectory('$dir/${campaign.id}')) sys.FileSystem.deleteFile('$dir/${campaign.id}/$name');
@@ -2301,6 +2370,7 @@ class TestMain {
     testSaveFiles();
     testRandom();
     testRuntimeEntities();
+    testSaveVersions();
     testSockets();
     testStory();
     testDialogLayout();

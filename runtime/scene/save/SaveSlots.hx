@@ -3,8 +3,9 @@ package scene.save;
 import haxe.io.Path;
 import sys.FileSystem;
 
-// seed: oyun olaylarının rastgele akışlarının kökü (RandomStreams).
-typedef CampaignInfo = {id : String, name : String, created : Float, ironman : Bool, version : String, ?seed : Int};
+// seed: oyun olaylarının rastgele akışlarının kökü (RandomStreams). ended/result: Ironman'da ekip tükenince
+// sefer biter; kayıtları silinmez, salt okunur kalır.
+typedef CampaignInfo = {id : String, name : String, created : Float, ironman : Bool, version : String, ?seed : Int, ?ended : Bool, ?result : String};
 typedef SaveEntry = {path : String, kind : String, modified : Float, campaign : String};
 
 // Seferler ve yuvalar: <kök>/<sefer>/{sefer.json, elle_<tarih>.kayit, hizli.kayit, oto_1..3.kayit, ironman.kayit}.
@@ -51,9 +52,63 @@ class SaveSlots {
   public function createCampaign(name : String, ironman : Bool, version : String, ?seed : Int) : CampaignInfo {
     var id = DateTools.format(Date.now(), "%Y%m%d_%H%M%S") + "_" + StringTools.hex(Std.random(0xFFFFFF), 6).toLowerCase();
     var info : CampaignInfo = {id: id, name: name, created: Date.now().getTime(), ironman: ironman, version: version, seed: seed == null ? newSeed() : seed};
-    makeDirectory('$root/$id');
-    sys.io.File.saveContent('$root/$id/$CAMPAIGN_FILE', haxe.Json.stringify(info, null, "  ") + "\n");
+    updateCampaign(info);
     return info;
+  }
+
+  public function updateCampaign(info : CampaignInfo) {
+    makeDirectory('$root/${info.id}');
+    sys.io.File.saveContent('$root/${info.id}/$CAMPAIGN_FILE', haxe.Json.stringify(info, null, "  ") + "\n");
+  }
+
+  // Devam et: bitmemiş seferlerin en yeni kaydı.
+  public function latestOverall() : Null<SaveEntry> {
+    var best : Null<SaveEntry> = null;
+    for (info in campaigns()) {
+      if (info.ended == true) continue;
+      var entry = latest(info.id);
+      if (entry != null && (best == null || entry.modified > best.modified)) best = entry;
+    }
+    return best;
+  }
+
+  // Steam Cloud'un eşitlediği boyut (kayıtlar ve sefer dosyası; yedek ve geçici dosya eşitlenmez).
+  public function campaignSize(campaign : String) : Int {
+    var folder = '$root/$campaign';
+    if (!FileSystem.exists(folder)) return 0;
+    var total = 0;
+    for (name in FileSystem.readDirectory(folder))
+      if (name == CAMPAIGN_FILE || Path.extension(name) == EXTENSION) total += FileSystem.stat('$folder/$name').size;
+    return total;
+  }
+
+  public function oldestManual(campaign : String) : Null<SaveEntry> {
+    var manual = saves(campaign).filter(entry -> entry.kind == MANUAL);
+    return manual.length == 0 ? null : manual[manual.length - 1];
+  }
+
+  // Kaydı ve yedeğini siler. Yalnızca bu kökteki bir seferin .kayit dosyası; başka yol reddedilir.
+  public function deleteSave(entry : SaveEntry) {
+    if (Path.directory(entry.path) != '$root/${entry.campaign}' || Path.extension(entry.path) != EXTENSION) throw 'kayıt yolu değil: ${entry.path}';
+    if (FileSystem.exists(entry.path)) FileSystem.deleteFile(entry.path);
+    var backup = entry.path + SaveFile.BACKUP_SUFFIX;
+    if (FileSystem.exists(backup)) FileSystem.deleteFile(backup);
+  }
+
+  // Başka kökte olup burada olmayan seferler (Steam'siz oynanan "yerel" seferler Steam hesabında).
+  public function missingFrom(other : SaveSlots) : Array<CampaignInfo> {
+    var here = [for (info in campaigns()) info.id => true];
+    return other.campaigns().filter(info -> !here.exists(info.id));
+  }
+
+  // Seferi başka kökten kopyalar (sefer dosyası ve kayıtlar; yedek değil). Burada zaten varsa dokunmaz.
+  public function copyCampaign(from : SaveSlots, id : String) : Bool {
+    var source = '${from.root}/$id', target = '$root/$id';
+    if (!FileSystem.exists('$source/$CAMPAIGN_FILE') || FileSystem.exists(target)) return false;
+    makeDirectory(target);
+    for (name in FileSystem.readDirectory(source))
+      if (name == CAMPAIGN_FILE || Path.extension(name) == EXTENSION) sys.io.File.copy('$source/$name', '$target/$name');
+    return true;
   }
 
   // Seferin kayıtları, en yenisi başta.
