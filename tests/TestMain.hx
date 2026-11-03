@@ -1462,6 +1462,53 @@ class TestMain {
     sys.FileSystem.deleteDirectory(dir);
   }
 
+  // Optimizasyon motoru: en iyisi bilinen yapay işlevler.
+  static function testTuner() {
+    function module(?lockY : Float, ?sumLimit : Float) {
+      var tunables : Array<scene.tune.TuneModule.Tunable> = [
+        {id: "x", title: "X", min: 0, max: 10, step: 1, value: 0},
+        {id: "y", title: "Y", min: 0, max: 10, step: 1, value: lockY != null ? lockY : 0, locked: lockY != null},
+      ];
+      var metrics : Array<scene.tune.TuneModule.Metric> = [
+        {id: "uzaklik", title: "Uzaklık", group: scene.tune.TuneModule.QUALITY, goal: Min(100), weight: 1},
+        {id: "toplam", title: "Toplam", group: scene.tune.TuneModule.PERFORMANCE, goal: Limit(null, sumLimit), weight: 0},
+      ];
+      return new scene.tune.TuneModule("deneme", "Deneme", tunables, metrics, (config, seed) -> {
+        var x = config.get("x"), y = config.get("y");
+        ["uzaklik" => (x - 3) * (x - 3) + (y - 7) * (y - 7) + (seed % 2) * 0.01, "toplam" => x + y];
+      });
+    }
+    var grid = new scene.tune.Tuner(module());
+    var found = grid.search(500);
+    check(found.method.indexOf("kaba kuvvet") == 0 && found.best.config.get("x") == 3 && found.best.config.get("y") == 7 && found.evaluated == 121, 'kaba kuvvet en iyiyi bulmalı: ${found.best.config}');
+    var sampled = new scene.tune.Tuner(module());
+    var near = sampled.search(60);
+    check(near.method.indexOf("rastgele") == 0 && near.best.config.get("x") == 3 && near.best.config.get("y") == 7 && near.evaluated <= 61, 'örnekleme ve yerel iyileştirme: ${near.best.config} (${near.evaluated})');
+    var again = new scene.tune.Tuner(module()).search(60);
+    check(sampled.keyOf(again.best.config) == sampled.keyOf(near.best.config) && again.evaluated == near.evaluated, "aynı tohum aynı arama");
+    var limited = new scene.tune.Tuner(module(null, 9)).search(500);
+    check(limited.best.valid && limited.best.config.get("x") + limited.best.config.get("y") <= 9 && limited.best.score > 0.98, 'sert sınır elemeli: ${limited.best.config}');
+    check(limited.baseline.valid && limited.baseline.config.get("x") == 0, "başlangıç (bugünkü değerler) değerlendirilir");
+    var locked = new scene.tune.Tuner(module(5)).search(500);
+    check(locked.best.config.get("y") == 5 && locked.best.config.get("x") == 3 && locked.evaluated == 11, 'kilitli ayar değişmemeli: ${locked.best.config}');
+    var report = scene.tune.TuneReport.write(grid, found, "deneme");
+    check(report.indexOf("**değişti**") > 0 && report.indexOf("Uzaklık") > 0 && report.indexOf("doğrulama") > 0, "rapor");
+    var lockedReport = scene.tune.TuneReport.write(new scene.tune.Tuner(module(5)), locked, "deneme");
+    check(lockedReport.indexOf("Kilitli ayarların etkisi") > 0, "kilitli ayarın etkisi raporda");
+    check(found.front.length >= 1 && found.front[0].valid, "kalite ve performans sınırı");
+    // Dışarıdan tohum çalıştırıcısı (işçi süreç havuzu gibi): tohumlar ters sırada çalışsa da sonuç tohum sırasıyla.
+    var outside = new scene.tune.Tuner(module());
+    var plain = module();
+    outside.seedRunner = (config, seeds) -> {
+      var reversed = seeds.copy();
+      reversed.reverse();
+      var done = [for (seed in reversed) seed => plain.run(config, seed)];
+      [for (seed in seeds) done.get(seed)];
+    };
+    var same = outside.search(60);
+    check(outside.keyOf(same.best.config) == sampled.keyOf(near.best.config) && same.best.score == near.best.score && same.evaluated == near.evaluated, "dışarıdan çalıştırıcıyla aynı sonuç");
+  }
+
   static function testSaveFiles() {
     var sections = [scene.save.SaveFile.section("meta", {format: 1, name: "Sefer ş"}), {name: "bos", data: haxe.io.Bytes.alloc(0)}];
     var bytes = scene.save.SaveFile.encode(sections);
@@ -2442,6 +2489,7 @@ class TestMain {
     testRuntimeEntities();
     testSaveVersions();
     testSaveWriter();
+    testTuner();
     testSockets();
     testStory();
     testDialogLayout();
