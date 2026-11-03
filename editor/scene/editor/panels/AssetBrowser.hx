@@ -2,6 +2,7 @@ package scene.editor.panels;
 
 import haxe.io.Path;
 import imgui.ImGui;
+import scene.editor.ImportSettings;
 import sys.FileSystem;
 
 // `res` klasörünü gösterir. Modeller sahneye veya Inspector'daki asset alanına sürüklenir.
@@ -32,6 +33,10 @@ class AssetBrowser {
   var payload = new hl.Bytes(1);
   var openImport = false;
   var pending : Array<String> = [];
+  var sources : Array<String> = [];
+  // Ayarları açık olan kaynak ve düzenlenen ayarlar; Kaydet'e kadar dosyaya yazılmaz.
+  var trimSource : Null<String>;
+  var settings = new ImportSettings();
   var importing : Null<String>;
   var importWait = 0;
   var images = new Map<String, h3d.mat.Texture>();
@@ -79,6 +84,8 @@ class AssetBrowser {
     ImGui.sameLine();
     if (ImGui.smallButton("Model içe aktar")) {
       pending = editor.importer.pending();
+      sources = editor.importer.sources();
+      trimSource = null;
       openImport = true;
     }
   }
@@ -101,21 +108,105 @@ class AssetBrowser {
       ImGui.endPopup();
       return;
     }
-    ImGui.text("assets klasöründe olup res klasörüne alınmamış modeller:");
-    if (pending.length == 0) ImGui.textDisabled("Yeni model yok");
-    for (source in pending.copy()) {
+    ImGui.text("assets klasöründeki modeller:");
+    if (sources.length == 0) ImGui.textDisabled("Model yok");
+    for (source in sources) {
       ImGui.pushID(source);
-      if (ImGui.smallButton("Al")) {
+      var fresh = pending.indexOf(source) >= 0;
+      if (ImGui.smallButton(fresh ? "Al" : "Yeniden al")) {
         importing = source;
         importWait = IMPORT_WAIT_FRAMES;
       }
       ImGui.sameLine();
-      ImGui.text(source);
+      if (fresh) ImGui.text(source) else ImGui.textDisabled(source);
+      ImGui.sameLine();
+      var saved = try ImportSettings.read(source) catch (e : Dynamic) null;
+      var summary = saved == null ? "Ayarlar (bozuk)" : saved.trim.length + saved.clips.length == 0 ? "Ayarlar" : 'Ayarlar (${saved.trim.length} kutu, ${saved.clips.length} klip)';
+      if (ImGui.smallButton(summary)) {
+        if (trimSource == source) trimSource = null;
+        else {
+          trimSource = source;
+          settings = saved == null ? new ImportSettings() : saved;
+        }
+      }
+      if (trimSource == source) drawSettings(source);
       ImGui.popID();
     }
     ImGui.separator();
     if (ImGui.button("Kapat")) ImGui.closeCurrentPopup();
     ImGui.endPopup();
+  }
+
+  // Kırpma: modelin kendi birimleriyle, Z yukarı; kutuyu ajan model_info'nun taban haritasından da önerebilir.
+  // Klipler: başka FBX'lerden alınıp bu modele eklenir (aynı iskelet). Karakter durma, yurume, kosma arar.
+  function drawSettings(source : String) {
+    ImGui.indent();
+    ImGui.text("Kırpma");
+    ImGui.textDisabled("Kutuların içinde kalan üçgenler içe aktarırken atılır. Birimler modelin kendisinin, Z yukarı.");
+    var trimBoxes = settings.trim;
+    var width = 64 * editor.interfaceScale;
+    var removed = -1;
+    for (i in 0...trimBoxes.length) {
+      var box = trimBoxes[i];
+      ImGui.pushID('kutu$i');
+      ImGui.text('Kutu ${i + 1}');
+      if (box.note != null && box.note != "") {
+        ImGui.sameLine();
+        ImGui.textDisabled(box.note);
+      }
+      ImGui.sameLine();
+      if (ImGui.smallButton("Sil")) removed = i;
+      for (row in 0...2) {
+        var values = row == 0 ? box.min : box.max;
+        ImGui.text(row == 0 ? "En az" : "En çok");
+        for (axis in 0...3) {
+          ImGui.sameLine();
+          ImGui.pushItemWidth(width);
+          var edited = values[axis];
+          if (ImGui.inputDouble('${["x", "y", "z"][axis]}##$row', edited, 0, 0, "%.1f")) values[axis] = edited;
+          ImGui.popItemWidth();
+        }
+      }
+      ImGui.popID();
+    }
+    if (removed >= 0) trimBoxes.splice(removed, 1);
+    if (ImGui.smallButton("+ Kutu")) trimBoxes.push({min: [0., 0., 0.], max: [0., 0., 0.]});
+    ImGui.separator();
+    ImGui.text("Klipler");
+    ImGui.textDisabled("Aynı iskeletle üretilmiş FBX'lerin animasyonu bu modele eklenir. Karakter durma, yurume, kosma adlarını kullanır.");
+    var gone = -1;
+    for (i in 0...settings.clips.length) {
+      var clip = settings.clips[i];
+      ImGui.pushID('klip$i');
+      ImGui.pushItemWidth(110 * editor.interfaceScale);
+      var name = clip.name;
+      if (ImGui.inputText("##ad", name)) clip.name = name;
+      ImGui.popItemWidth();
+      ImGui.sameLine();
+      ImGui.pushItemWidth(280 * editor.interfaceScale);
+      if (ImGui.beginCombo("##kaynak", clip.source == "" ? "(FBX seç)" : clip.source)) {
+        for (candidate in sources) if (candidate != source && ImGui.selectable(candidate, candidate == clip.source)) clip.source = candidate;
+        ImGui.endCombo();
+      }
+      ImGui.popItemWidth();
+      ImGui.sameLine();
+      if (ImGui.smallButton("Sil")) gone = i;
+      ImGui.popID();
+    }
+    if (gone >= 0) settings.clips.splice(gone, 1);
+    if (ImGui.smallButton("+ Klip")) settings.clips.push({name: ["durma", "yurume", "kosma"][Std.int(Math.min(2, settings.clips.length))], source: ""});
+    ImGui.separator();
+    if (ImGui.smallButton("Kaydet")) {
+      try {
+        var checked = new ImportSettings();
+        checked.trim = [for (box in trimBoxes) ModelTrim.check(box)];
+        checked.clips = [for (clip in settings.clips) ImportSettings.checkClip(clip)];
+        checked.write(source);
+        pending = editor.importer.pending();
+        editor.show('Ayarlar kaydedildi: ${ImportSettings.path(source)}. Modeli yeniden al');
+      } catch (e : Dynamic) editor.show('Ayarlar kaydedilemedi: $e', true);
+    }
+    ImGui.unindent();
   }
 
   function importModel(source : String) {
@@ -127,7 +218,7 @@ class AssetBrowser {
     }
     pending.remove(source);
     enter(Path.directory(result.target));
-    editor.show('İçe aktarıldı: ${result.target} (${result.triangles} üçgen, ${result.parts} parça)');
+    editor.show('İçe aktarıldı: ${result.target} (${result.triangles} üçgen, ${result.parts} parça${result.trimmed > 0 ? ", " + result.trimmed + " üçgen kırpıldı" : ""})');
   }
 
   function drawTiles() {

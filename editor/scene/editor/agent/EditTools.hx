@@ -85,8 +85,19 @@ class EditTools {
     }, args -> path(args.from, args.to), true, ["from", "to"]);
     tool("list_models", "Modeller. models: res altındaki yerleştirilebilir modeller; model bileşeninin path alanına bu yol yazılır. notImported: assets altında olup içe aktarılmamış veya kaynağı sonradan değişmiş FBX'ler, import_model ile alınır.", {}, _ -> listModels(), true);
     server.add({name: "import_model", readOnly: false, run: importModel,
-      description: "assets altındaki bir FBX'i Asset Browser'daki Model içe aktar gibi dönüştürür, res/models altına yazar. Dosya işidir, geri alma adımı değildir; yeniden alınca sahnelerdeki yol değişmez. Büyük modelde editör bir süre tepki vermez. Dönen path'i model bileşenine yaz.",
-      schema: {type: "object", properties: {source: {type: "string", description: "assets yolu veya dosya adının bir parçası"}}, required: ["source"]}});
+      description: "assets altındaki bir FBX'i Asset Browser'daki Model içe aktar gibi dönüştürür, res/models altına yazar. Dosya işidir, geri alma adımı değildir; yeniden alınca sahnelerdeki yol değişmez. Büyük modelde editör bir süre tepki vermez. Dönen path'i model bileşenine yaz. "
+        + "trim verilirse kaynağın yanındaki .aktarim.json'a yazılır ve kutuların içinde kalan üçgenler atılır (yapay zekâ modellerindeki yer plakası, havada kalan parça); [] kırpmayı kaldırır. Kutuları model_info'nun sınırlarına ve taban haritasına göre seç.",
+      schema: {type: "object", properties: {
+        source: {type: "string", description: "assets yolu veya dosya adının bir parçası"},
+        trim: {type: "array", description: "[{min: [x, y, z], max: [x, y, z], note?}], modelin kendi birimleriyle, Z yukarı", items: {type: "object"}},
+        clips: {type: "array", description: "[{name, source}]: aynı iskeletle üretilmiş başka FBX'lerin klipleri bu modele eklenir. Karakter durma, yurume, kosma adlarını kullanır; [] klipleri kaldırır", items: {type: "object"}},
+      }, required: ["source"]}});
+    server.add({name: "model_info", readOnly: true, run: modelInfo,
+      description: "assets altındaki bir FBX'i dönüştürmeden inceler: sınırlar (modelin birimleriyle, Z yukarı), üçgen sayısı, iskelet eklemleri, klipler, kırpma ayarı ve taban haritası. Taban haritası alt %3'teki üçgenlerin yukarıdan sayısıdır: ayaklar iki küme olur, başka küme genellikle fazlalıktır. Büyük modelde editör bir süre tepki vermez.",
+      schema: {type: "object", properties: {
+        source: {type: "string", description: "assets yolu veya dosya adının bir parçası"},
+        floorFraction: {type: "number", description: "Taban haritasının yüksekliği, modelin boyuna oranla (varsayılan 0.03)"},
+      }, required: ["source"]}});
   }
 
   function editScene(args : Dynamic) : Dynamic {
@@ -514,6 +525,22 @@ class EditTools {
   // Asset Browser gibi: dönüştürme birkaç kare sonra başlar, tasarımcı durum satırında ne olduğunu görür.
   function importModel(args : Dynamic) : AgentReply {
     var source = modelSource(args.source);
+    if (args.trim != null || args.clips != null) {
+      var settings = ImportSettings.read(source);
+      if (args.trim != null) {
+        var boxes : Array<Dynamic> = args.trim;
+        settings.trim = [for (box in boxes) ModelTrim.check(box)];
+      }
+      if (args.clips != null) {
+        var clips : Array<Dynamic> = args.clips;
+        settings.clips = [for (clip in clips) {
+          var spec = ImportSettings.checkClip(clip);
+          spec.source = modelSource(spec.source);
+          spec;
+        }];
+      }
+      settings.write(source);
+    }
     editor.show('Ajan modeli dönüştürüyor: $source. Büyük modellerde editör bir süre tepki vermez');
     var frames = IMPORT_WAIT_FRAMES;
     return {timeout: IMPORT_TIMEOUT, wait: function() : Null<AgentReply> {
@@ -526,8 +553,20 @@ class EditTools {
       }
       AssetImporter.forgetMissingFiles();
       editor.document.validate();
-      editor.show('İçe aktarıldı: ${result.target} (${result.triangles} üçgen, ${result.parts} parça)');
-      return {value: {source: source, path: result.target.substr(RESOURCE_DIRECTORY.length + 1), triangles: result.triangles, parts: result.parts, problems: result.problems}};
+      editor.show('İçe aktarıldı: ${result.target} (${result.triangles} üçgen, ${result.parts} parça${result.trimmed > 0 ? ", " + result.trimmed + " üçgen kırpıldı" : ""})');
+      return {value: {source: source, path: result.target.substr(RESOURCE_DIRECTORY.length + 1), triangles: result.triangles, parts: result.parts, trimmed: result.trimmed, clips: result.clips, problems: result.problems}};
+    }};
+  }
+
+  function modelInfo(args : Dynamic) : AgentReply {
+    var source = modelSource(args.source);
+    editor.show('Ajan modeli inceliyor: $source. Büyük modellerde editör bir süre tepki vermez');
+    var frames = IMPORT_WAIT_FRAMES;
+    return {timeout: IMPORT_TIMEOUT, wait: function() : Null<AgentReply> {
+      if (--frames > 0) return null;
+      var info = editor.importer.inspect(source, args.floorFraction);
+      editor.show('İncelendi: $source');
+      return {value: info};
     }};
   }
 
