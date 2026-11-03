@@ -109,6 +109,9 @@ class Editor {
   static inline var STATUS_SECONDS = 2.;
   var statusTimer = STATUS_SECONDS;
   var panels : Array<Panel> = [];
+  // Oyunun kayıt biçimini bilen rapor (oyun verir); yoksa Kayıttan oyna menüsü görünmez.
+  public var saveInspector : Null<SaveInspector>;
+  public var savesWindow(default, null) : scene.editor.panels.SavesWindow;
   var messages : Array<String> = [];
   var notice = "";
   var noticeIsError = false;
@@ -177,6 +180,7 @@ class Editor {
     addPanel(DATA, dataPanel.draw);
     addPanel(DIALOGS, dialogPanel.draw);
 
+    savesWindow = new scene.editor.panels.SavesWindow(this);
     agent = new AgentServer(AgentServer.PORT, ContextTools.INSTRUCTIONS);
     var agentPanel = new scene.editor.panels.AgentPanel(this);
     addPanel(AGENT, agentPanel.draw);
@@ -210,6 +214,7 @@ class Editor {
       ImGui.end();
     }
     dialogWorkspace.draw();
+    savesWindow.draw();
     drawLabels();
     if (showAssets) {
       ImGui.setWindowFocus(ASSETS);
@@ -324,13 +329,31 @@ class Editor {
   }
 
   // Görev testi ayrı oyun sürecinde oynar: dünya kayıtlı haliyle açılır, kamera verilmez.
-  // Kaydedilmemiş değişiklikler teste girmez; save true ise önce kaydedilir.
+  // Kaydedilmemiş değişiklikler teste girmez; save true ise önce kaydedilir. Testte save alanı (kayıt dosyası)
+  // varsa oyun o kayıttan açılır: oyuncunun kaydındaki bir hatayı yeniden üretmek için.
   public function startPlayTest(test : Dynamic, save : Bool) : Null<String> {
     if (session.isRunning) return "Oyun zaten açık: kapanmasını bekle";
+    var from : Null<String> = test.save;
+    if (from != null && !FileSystem.exists(from)) return 'Testin kaydı yok: $from';
     if (save && commands.isDirty && !document.save()) return "Kaydedilemedi";
     PlayTests.prepare(test);
-    session.start(new PlayOptions(document.resourcePath()));
+    var options = new PlayOptions(document.resourcePath());
+    options.save = from;
+    session.start(options);
     return null;
+  }
+
+  // Kayıttan oyna: oyun bu kayıtla açılır; kayıt hata ayıklama seferine kopyalanır, asıl dosyaya yazılmaz.
+  public function playFromSave(path : String) {
+    if (session.isRunning) {
+      show("Oyun zaten açık");
+      return;
+    }
+    if ((commands.isDirty || !FileSystem.exists(document.path)) && !document.save()) return;
+    var options = new PlayOptions(document.resourcePath());
+    options.save = path;
+    session.start(options);
+    show('Oyun kayıttan açılıyor: ${haxe.io.Path.withoutDirectory(path)}');
   }
 
   function runDesignerTest(name : String) {
@@ -577,6 +600,7 @@ class Editor {
     }
     if (ImGui.beginMenu("Oyun")) {
       if (ImGui.menuItem("Buradan oyna", "F5", false, !session.isRunning)) play();
+      if (saveInspector != null && ImGui.menuItem("Kayıttan oyna…")) savesWindow.open();
       // Oyun dağıtılırken: oyunculara ulaşan durumlu nesneler korunmaya başlar (silinince uyarı, eşleme).
       if (ImGui.menuItem("Yayın kimliklerini kaydet")) {
         var recorded = releaseIds.record();

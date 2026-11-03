@@ -61,6 +61,7 @@ class ExamTools {
       throw 'Bu görev kaydetmeyi gerektirir. Önce kaydedilmemiş işini kaydet: ${editor.document.unsavedFiles().join(", ")}';
     var steps : Array<Dynamic> = task.setup == null ? [] : task.setup;
     try {
+      copyFiles(task, origin);
       for (step in steps) server.callTool(step.tool, prepare(step.arguments));
     } catch (e : Dynamic) {
       restore(origin);
@@ -144,6 +145,9 @@ class ExamTools {
         var steps : Array<Dynamic> = try PlayTests.load(name).steps catch (e : Dynamic) [];
         if (spec.item != null && !Lambda.exists(steps, step -> step.expect != null && step.expect.item == spec.item))
           return {ok: false, detail: '$name testi ${spec.item} eşyasını beklemiyor'};
+        // Kayıttan başlayan test: oyuncunun kaydındaki hatayı yeniden üretip düzeltmeyi doğrulamak için.
+        if (spec.save == true && (try PlayTests.load(name).save catch (e : Dynamic) null) == null)
+          return {ok: false, detail: '$name testi bir kayıttan başlamıyor (save alanı yok)'};
         var result = PlayTests.result();
         if (result == null || FileSystem.stat(PlayFiles.RESULT).mtime.getTime() < base.wall - 1000) return {ok: false, detail: '$name için sonuç yok'};
         var failures : Array<String> = result.failures == null ? [] : result.failures;
@@ -328,6 +332,8 @@ class ExamTools {
       rows: [for (name => table in editor.data.tables) name => table.ids()],
       dialogs: editor.dialogs.ids(),
       releaseList: FileSystem.exists(ReleaseIds.PATH) ? sys.io.File.getContent(ReleaseIds.PATH) : null,
+      copied: [],
+      copiedDirs: [],
       camera: {target: orbit.lookPoint(), distance: orbit.distance, yaw: orbit.yaw, pitch: orbit.pitch},
       selection: [for (entity in editor.selection.items) entity.id],
     };
@@ -335,7 +341,33 @@ class ExamTools {
 
   // Geri alır; görev kaydettiyse ve önceden kaydedilmemiş iş yoksa disk de eski haline yazılır.
   // Görevde yazılan test dosyaları LEFTOVERS altına taşınır.
+  // Görevin dosyaları (örneğin oyuncudan gelmiş bir kayıt): yerlerine kopyalanır, sınav sonunda yalnızca
+  // sınavın koyduğu dosyalar ve açtığı boş klasörler silinir. Var olan dosyanın üstüne yazılmaz.
+  function copyFiles(task : Dynamic, origin : Baseline) {
+    var files : Array<Dynamic> = task.files == null ? [] : task.files;
+    for (file in files) {
+      var from : String = file.from, to : String = file.to;
+      if (!FileSystem.exists(from)) throw 'sınav dosyası yok: $from';
+      if (FileSystem.exists(to)) throw 'sınav dosyası zaten var, üstüne yazılmaz: $to';
+      var missing = [], at = haxe.io.Path.directory(to);
+      while (at != "" && !FileSystem.exists(at)) {
+        missing.unshift(at);
+        at = haxe.io.Path.directory(at);
+      }
+      for (dir in missing) {
+        FileSystem.createDirectory(dir);
+        origin.copiedDirs.push(dir);
+      }
+      File.copy(from, to);
+      origin.copied.push(to);
+    }
+  }
+
   function restore(base : Baseline) : Dynamic {
+    for (path in base.copied) if (FileSystem.exists(path)) FileSystem.deleteFile(path);
+    var dirs = base.copiedDirs.copy();
+    dirs.reverse();
+    for (dir in dirs) if (FileSystem.exists(dir) && FileSystem.readDirectory(dir).length == 0) FileSystem.deleteDirectory(dir);
     while (editor.commands.undoCount > base.undoCount) editor.commands.undo();
     var saved = false, note : Null<String> = null, dropped = [];
     if (editor.commands.isDirty) {
@@ -419,5 +451,8 @@ typedef Baseline = {
   camera : {target : Vec3, distance : Float, yaw : Float, pitch : Float},
   // Yayın listesi (res/kayit/kimlikler.json) dosya işidir, geri alma onu kapsamaz: sınav sonunda eski hali geri konur.
   releaseList : Null<String>,
+  // Görevin kopyaladığı dosyalar ve açtığı klasörler (task.files): sınav sonunda silinir.
+  copied : Array<String>,
+  copiedDirs : Array<String>,
   selection : Array<String>,
 };

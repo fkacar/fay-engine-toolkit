@@ -25,11 +25,11 @@ class PlayTools {
       schema: {type: "object", properties: {limit: {type: "integer"}, type: {type: "string", description: "Yalnızca bu türdeki kayıtlar"}}},
       run: args -> ({value: readTrace(args.limit == null ? TRACE_LIMIT : args.limit, args.type)} : AgentReply)});
     server.add({name: "list_quest_tests", readOnly: true,
-      description: "res/tests altındaki görev testleri. Biçim kılavuzda: title, start {near, distance}, timeout ve steps (walkTo, waitDialog, advance, choose, wait, expect {item|flag|standing|fired|dialogOpen|message, atLeast|equals|atMost}).",
+      description: "res/tests altındaki görev testleri. Biçim kılavuzda: title, start {near, distance}, save (isteğe bağlı kayıt dosyası: test o kayıttan başlar), timeout ve steps (walkTo, waitDialog, advance, choose, wait, expect {item|flag|standing|fired|dialogOpen|message, atLeast|equals|atMost}).",
       schema: {type: "object", properties: {}},
       run: _ -> ({value: [for (name in PlayTests.list()) {name: name, test: PlayTests.load(name)}]} : AgentReply)});
     server.add({name: "run_quest_test", readOnly: true,
-      description: "Kaydedilmiş bir görev testini oyunda oynar, bitince sonucu (adım adım), oyunun son durumunu ve izi döner. Dünya kayıtlı haliyle açılır; kaydedilmemiş değişiklikler teste girmez. Oyun ayrı pencerede açılıp kapanır.",
+      description: "Kaydedilmiş bir görev testini oyunda oynar, bitince sonucu (adım adım), oyunun son durumunu ve izi döner. Dünya kayıtlı haliyle açılır; kaydedilmemiş değişiklikler teste girmez. Testte save varsa oyun o kayıttan açılır (hata ayıklama kopyası). Oyun ayrı pencerede açılıp kapanır.",
       schema: {type: "object", properties: {name: {type: "string"}}, required: ["name"]},
       run: args -> {
         var test = PlayTests.load(args.name);
@@ -39,9 +39,10 @@ class PlayTools {
         return reply;
       }});
     server.add({name: "playtest", readOnly: true,
-      description: "Kaydedilmemiş bir görev testi tarifini oyunda oynar (run_quest_test ile aynı biçim, steps zorunlu). Ne olduğunu denemek ve bir hatayı yeniden üretmek için. Dünya kayıtlı haliyle açılır.",
+      description: "Kaydedilmemiş bir görev testi tarifini oyunda oynar (run_quest_test ile aynı biçim, steps zorunlu). Ne olduğunu denemek ve bir hatayı yeniden üretmek için. Dünya kayıtlı haliyle açılır; save verilirse o kayıttan (list_saves).",
       schema: {type: "object", properties: {
         title: {type: "string"},
+        save: {type: "string", description: "Kayıt dosyasının yolu (list_saves): oyun o kayıttan başlar, asıl dosyaya yazılmaz"},
         start: {type: "object", description: "{near: nesne adı, distance: metre} veya {at: [x, y]}"},
         steps: {type: "array", items: {type: "object"}},
         timeout: {type: "number"},

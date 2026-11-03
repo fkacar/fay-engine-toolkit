@@ -1342,6 +1342,21 @@ class TestMain {
     var again : Dynamic = haxe.Json.parse(haxe.Json.stringify({states: delta.toData(), removed: delta.removedList(), created: delta.createdList()}));
     var third = open(scene.save.WorldDelta.fromData(again.states, again.removed, again.created));
     check(third.game.find("o5") != null, "genel hücredeki kurulan nesne açılışta gelmeli");
+    // Sahiplik bileşenin durumunda (owner): bölge sıfırlama korur. Import yalnızca oyuncununkileri taşır.
+    var owned = scene.save.WorldDelta.fromData(haxe.Json.parse('[{"id": "ekipten", "cell": 0, "components": {"sayac": {"hits": 2, "owner": "oyuncu"}}}, {"id": "dunyadan", "cell": 0, "components": {"sayac": {"hits": 3}}}]'),
+      haxe.Json.parse('[{"id": "yikilan", "cell": 0}]'),
+      haxe.Json.parse('[{"id": "o1", "cell": 0, "owner": "oyuncu", "scene": {"version": 1, "entities": [{"id": "o1", "name": "Kulübe", "components": []}]}}, {"id": "o2", "cell": 0, "owner": "", "scene": {"version": 1, "entities": [{"id": "o2", "name": "Sandık", "components": []}]}}]'));
+    check(owned.isPlayerOwned("ekipten") && owned.isPlayerOwned("o1") && !owned.isPlayerOwned("dunyadan") && !owned.isPlayerOwned("o2"), "sahiplik: durumda owner ya da oyuncunun kurduğu");
+    var part = owned.importPart();
+    check(part.stateOf("ekipten") != null && part.stateOf("dunyadan") == null && part.isCreated("o1") && !part.isCreated("o2") && !part.isRemoved("yikilan"), "Import yalnızca oyuncununkileri taşımalı");
+    // Hikâye ilerlemesi (story): çalışmış ödül tetikleyicisi sıfırlamadan sağ çıkar, ödül ikinci kez alınamaz.
+    var story = scene.save.WorldDelta.fromData(haxe.Json.parse('[{"id": "odul", "cell": 0, "components": {"tetik": {"done": true, "story": true}}}, {"id": "npc", "cell": 0, "components": {"alan": {"x": 1}}}]'));
+    check(story.isStory("odul") && !story.isStory("npc") && story.importPart().stateOf("odul") != null && story.importPart().stateOf("npc") == null, "Import hikâye ilerlemesini taşımalı");
+    story.forgetCell(0);
+    check(story.stateOf("odul") != null && story.stateOf("npc") == null, "bölge sıfırlama hikâye ilerlemesini korumalı");
+    check(owned.stateOf("dunyadan") != null && owned.isRemoved("yikilan"), "Import asıl farka dokunmamalı");
+    owned.forgetCell(0);
+    check(owned.stateOf("ekipten") != null && owned.stateOf("dunyadan") == null && owned.isCreated("o1") && !owned.isRemoved("yikilan"), "bölge sıfırlama durumunda owner olanı korumalı");
     var ids = [for (_ in 0...3) scene.save.WorldDelta.newId(new scene.save.Random(9))];
     check(ids[0] == ids[1] && StringTools.startsWith(ids[0], "o") && ids[0].length == 16, 'kurulan nesne kimliği akıştan, aynı tohumla aynı: ${ids[0]}');
   }

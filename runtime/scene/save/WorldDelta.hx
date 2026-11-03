@@ -185,12 +185,59 @@ class WorldDelta {
     return moved;
   }
 
-  // Bölgeyi sıfırlamak: hücrenin bütün farkı atılır, açılınca tasarlanmış haliyle gelir. Oyuncunun kurduğu
-  // nesneler (ve durumları) kalır.
+  // Sahiplik (docs/KAYIT_PLANI.md, Import ve bölge sıfırlama): oyunda oyuncunun kurduğu nesne ya da bileşen
+  // durumlarından birinde owner: "oyuncu" olan nesne (ekip üyesi). Bölge sıfırlama ve Import bunları korur.
+  public function isPlayerOwned(id : String) : Bool {
+    if (ownerOf(id) == PLAYER) return true;
+    var saved = states.get(id);
+    if (saved == null) return false;
+    for (key in saved.keys()) {
+      var state : Dynamic = saved.get(key);
+      if (state != null && Reflect.isObject(state) && Reflect.field(state, "owner") == PLAYER) return true;
+    }
+    return false;
+  }
+
+  // Hikâye ilerlemesi: bileşen durumlarından birinde story: true (çalışmış "bir kez" tetikleyici). Sıfırlamalar
+  // dünyanın fiziksel halini geri alır, hikâyeyi değil: görev ödülü ikinci kez alınamaz.
+  public function isStory(id : String) : Bool {
+    var saved = states.get(id);
+    if (saved == null) return false;
+    for (key in saved.keys()) {
+      var state : Dynamic = saved.get(key);
+      if (state != null && Reflect.isObject(state) && Reflect.field(state, "story") == true) return true;
+    }
+    return false;
+  }
+
+  // Bölge sıfırlama ve Import'tan sağ çıkan: oyuncunun olanlar ve hikâye ilerlemesi.
+  public function survivesReset(id : String) : Bool {
+    return isPlayerOwned(id) || isStory(id);
+  }
+
+  // Bölgeyi sıfırlamak: hücrenin farkı atılır, açılınca tasarlanmış haliyle gelir. Oyuncunun olanlar (kurdukları,
+  // ekip) ve hikâye ilerlemesi (çalışmış tetikleyici) kalır.
   public function forgetCell(cell : Int) {
-    for (id in [for (key in states.keys()) key]) if (cellOf(id) == cell && ownerOf(id) != PLAYER) states.remove(id);
+    for (id in [for (key in states.keys()) key]) if (cellOf(id) == cell && !survivesReset(id)) states.remove(id);
     for (id in [for (key in removed.keys()) key]) if (removed.get(id) == cell) removed.remove(id);
     for (id in [for (key in created.keys()) key]) if (created.get(id).cell == cell && created.get(id).owner != PLAYER) forgetCreated(id);
+  }
+
+  // Import (dünyayı sıfırla): oyuncunun olanlar ve hikâye ilerlemesi kalır. Dünyanın fiziksel farkı (NPC'ler,
+  // silindi işaretleri, dünyanın kurdukları) gider; dünya tasarlanmış haliyle açılır.
+  public function importPart() : WorldDelta {
+    var part = new WorldDelta();
+    for (record in created) if (record.owner == PLAYER) part.recordCreated(record.id, copy(record.scene), record.cell, record.owner);
+    for (id => saved in states)
+      if (survivesReset(id)) {
+        part.states.set(id, copy(saved));
+        if (cells.exists(id)) part.cells.set(id, cells.get(id));
+      }
+    return part;
+  }
+
+  static function copy(value : Dynamic) : Dynamic {
+    return haxe.Json.parse(haxe.Json.stringify(value));
   }
 
   // Dosyaya: hücre → nesneler. Kimlik sırasıyla, her seferinde aynı metin.
