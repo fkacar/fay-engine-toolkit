@@ -1,0 +1,5 @@
+# Komut satırından içe aktarma (scene.editor.ImportMain), Mac yerel derlemesi: ./run.sh ice-aktar <kaynak ...>.
+# Pencere açmaz. Windows'ta import.hxml (HashLink bayt kodu).
+libs/scene-toolkit/import.hxml
+-D no-compilation
+-hl bin/ice-aktar-c/main.c

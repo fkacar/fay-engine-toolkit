@@ -17,7 +17,8 @@ mkdir -p "$OBJ_DIR"
 cd "$EXTENSION"
 
 # Dosya adı sona eklenir, script'te $0 HL_DIR, $1 OBJ_DIR, $2 kaynak dosyadır.
-ls *.cpp lib/imgui/*.cpp addons/node_editor/*.cpp lib/imgui-node-editor/*.cpp addons/markdown/*.cpp |
+# Son dosya araç takımının yerel eki (kare koruması, scene.editor.FrameGuard).
+ls *.cpp lib/imgui/*.cpp addons/node_editor/*.cpp lib/imgui-node-editor/*.cpp addons/markdown/*.cpp "$ROOT/libs/scene-toolkit/editor/native/imgui_guard.cpp" |
   xargs -n 1 -P "$(sysctl -n hw.ncpu)" sh -c '
     clang++ -arch arm64 -std=c++14 -O2 -fPIC -w \
       -DIMGUI_USER_CONFIG="\"../../imgui_config.h\"" \
@@ -27,4 +28,6 @@ ls *.cpp lib/imgui/*.cpp addons/node_editor/*.cpp lib/imgui-node-editor/*.cpp ad
 clang++ -arch arm64 -dynamiclib -install_name @rpath/hlimgui.hdll -o "$HL_DIR/hlimgui.hdll" \
   "$OBJ_DIR"/*.o "$HL_DIR/libhl.dylib" -framework ApplicationServices
 
+# Sürüm damgası: run.sh eski hdll'i tanır (yerel ek değişince tools/hlimgui-surum.txt artar).
+cp "$ROOT/libs/scene-toolkit/tools/hlimgui-surum.txt" "$HL_DIR/hlimgui-surum.txt"
 echo "Hazır: libs/scene-toolkit/vendor/hashlink/mac-arm64/hlimgui.hdll"

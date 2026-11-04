@@ -17,9 +17,17 @@ typedef EntitySlot = {
   var index : Int;
 }
 
+// Oyunun sistemleri (fizik gibi) nesnelerin oyunda başlamasını ve silinmesini dinler: bileşenler başladıktan sonra,
+// silinmeden önce. Yalnızca oyun kipinde ve sahne başlamışken.
+typedef SceneObserver = {
+  var started : Entity->Void;
+  var destroyed : Entity->Void;
+}
+
 // Yüklenmiş sahne. Dosya verisini canlı nesnelere çevirir ve geri yazar.
 @:allow(scene)
 class SceneInstance {
+  public var observers(default, null) : Array<SceneObserver> = [];
   public var root(default, null) : h3d.scene.Object;
   public var mode(default, null) : SceneMode;
   public var registry(default, null) : ComponentRegistry;
@@ -69,6 +77,7 @@ class SceneInstance {
       if (delta.isCreatedRoot(entity.id)) delta.updateCreated(entity.id, createdData(entity), cellAt(entity));
     }
     for (child in entity.children.copy()) destroyEntity(child);
+    if (hasStarted) for (observer in observers) observer.destroyed(entity);
     for (component in entity.components) destroyComponent(component);
     entity.setParent(null);
     entity.object.remove();
@@ -306,8 +315,15 @@ class SceneInstance {
       for (entity in created) delta.placeIn(entity, cell);
       for (entity in created) if (entity.parent == null) delta.recordCreated(entity.id, createdData(entity), cell, owner);
     }
-    if (hasStarted) for (entity in created) for (component in entity.components) component.onStart();
+    if (hasStarted) {
+      for (entity in created) for (component in entity.components) component.onStart();
+      notifyStarted(created);
+    }
     return created;
+  }
+
+  function notifyStarted(started : Array<Entity>) {
+    for (observer in observers) for (entity in started) observer.started(entity);
   }
 
   // Dünyadaki noktanın hücresi (spawnEntities için); dünya yoksa genel.
@@ -339,6 +355,7 @@ class SceneInstance {
     var all = entities.copy();
     if (delta != null) for (entity in all) delta.restore(entity);
     for (entity in all) for (component in entity.components) component.onStart();
+    notifyStarted(all);
   }
 
   // Oyun sürerken gelen hücre: nesneler başlangıcı kaçırmasın. Kayıtlı farkları başlamadan önce yüklenir.
@@ -348,6 +365,7 @@ class SceneInstance {
     if (hasStarted) {
       if (delta != null) for (entity in created) delta.restore(entity);
       for (entity in created) for (component in entity.components) component.onStart();
+      notifyStarted(created);
     }
     return created;
   }

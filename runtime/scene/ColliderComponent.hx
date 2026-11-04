@@ -1,10 +1,20 @@
 package scene;
 
-// Çarpışma şekli. Yalnızca veridir, fizik motorundan bağımsız saklanır: motor seçilince oyun
-// tarafı bu alanları okur. "model" şekli nesnenin kendi mesh'ini kullanır.
+// Çarpışma şekli. Yalnızca veridir, fizik motorundan bağımsız saklanır: oyunun fizik servisi `bridge` ile bağlanır.
+// "model" şekli nesnenin kendi mesh'ini kullanır.
+typedef ColliderBridge = {
+  // Oyunda nesne başlayınca (onStart), silinince ve taşınınca.
+  var added : ColliderComponent->Void;
+  var removed : ColliderComponent->Void;
+  var moved : ColliderComponent->Void;
+}
+
 @:component("collider")
 class ColliderComponent extends Component {
   static inline var COLOR = 0xFF40E0A0;
+
+  // Oyunun fizik servisi verir; yoksa (editör, araçlar) bileşen yalnızca veridir.
+  public static var bridge : Null<ColliderBridge>;
 
   @:editable("Şekil") @:choice("kutu", "kapsul", "model") public var shape : String = "kutu";
   @:editable("Genişlik", 0.01, 500) public var width : Float = 2;
@@ -12,6 +22,18 @@ class ColliderComponent extends Component {
   @:editable("Yükseklik", 0.01, 500) public var height : Float = 2;
   @:editable("Yarıçap", 0.01, 100) public var radius : Float = 0.5;
   @:editable("Yerden yükseklik") public var offset : Float = 0;
+
+  override function onStart() {
+    if (bridge != null) bridge.added(this);
+  }
+
+  override function onDestroy() {
+    if (bridge != null) bridge.removed(this);
+  }
+
+  override function onEntityMoved() {
+    if (bridge != null) bridge.moved(this);
+  }
 
   override public function drawOverlay(overlay : Overlay, selected : Bool) {
     if (!selected) return;

@@ -109,6 +109,11 @@ class Editor {
   static inline var STATUS_SECONDS = 2.;
   var statusTimer = STATUS_SECONDS;
   var panels : Array<Panel> = [];
+  // Kare koruması: hata veren paneller (başlık → hata), son hata ve acil yedekler arası süre.
+  static inline var BACKUP_SECONDS = 10.;
+  var panelErrors = new Map<String, String>();
+  var lastFailure = "";
+  var backupCooldown = 0.;
   // Oyunun kayıt biçimini bilen rapor (oyun verir); yoksa Kayıttan oyna menüsü görünmez.
   public var saveInspector : Null<SaveInspector>;
   public var savesWindow(default, null) : scene.editor.panels.SavesWindow;
@@ -195,35 +200,90 @@ class Editor {
     panels.push({title: title, draw: draw});
   }
 
+  // Her bölüm kare korumasıyla çizilir (FrameGuard): biri hata verirse karenin geri kalanı çizilir, editör kapanmaz.
   public function draw() {
     var dt = hxd.Timer.dt;
-    selection.purge(scene);
-    document.update(dt);
-    var failure = session.poll();
-    if (failure != null) report(failure);
-
-    agent.update(dt);
-    pollDesignerTest();
-    writeStatus(dt);
-    readShortcuts();
+    backupCooldown -= dt;
+    section("Editör", () -> {
+      selection.purge(scene);
+      document.update(dt);
+      var failure = session.poll();
+      if (failure != null) report(failure);
+      agent.update(dt);
+      pollDesignerTest();
+      writeStatus(dt);
+      readShortcuts();
+    });
     keyboardPanelFocused = false;
-    drawMenu();
-    drawDockSpace();
+    section("Menü", drawMenu);
+    section("Panel yerleşimi", drawDockSpace);
     for (panel in panels) {
-      if (ImGui.begin(panel.title)) panel.draw();
+      if (ImGui.begin(panel.title)) drawPanel(panel);
       ImGui.end();
     }
-    dialogWorkspace.draw();
-    savesWindow.draw();
-    drawLabels();
+    section("Diyalog çalışma alanı", dialogWorkspace.draw);
+    section("Kayıtlar penceresi", savesWindow.draw);
+    section("Etiketler", drawLabels);
     if (showAssets) {
       ImGui.setWindowFocus(ASSETS);
       ImGui.setWindowFocus(INSPECTOR);
     }
     showAssets = false;
-    viewport.update(dt);
-    drawNotice();
-    drawPopups();
+    section("Sahne görünümü", () -> viewport.update(dt));
+    section("Bildirim", drawNotice);
+    section("Açılır pencereler", drawPopups);
+  }
+
+  // Hata veren panel durur: hatasını gösterir, "Yeniden dene"ye basılana kadar çizilmez (her karede aynı hata olmasın).
+  function drawPanel(panel : Panel) {
+    var error = panelErrors.get(panel.title);
+    if (error == null) {
+      error = FrameGuard.run(panel.draw);
+      if (error == null) return;
+      panelErrors.set(panel.title, error);
+      failed('"${panel.title}" paneli', error);
+    }
+    ImGui.textColored(ERROR_COLOR, "Bu panel hata verdi; editörün geri kalanı çalışıyor.");
+    ImGui.textWrapped(firstLine(error));
+    if (ImGui.button("Yeniden dene##panel-hatasi")) panelErrors.remove(panel.title);
+  }
+
+  function section(where : String, draw : Void->Void) {
+    var error = FrameGuard.run(draw);
+    if (error != null) failed(where, error);
+  }
+
+  // Uygulama verir: korunmayan bir yerde (oyun kodu, çizim) yarıda kalan kare. Heaps hatayı günlüğe yazmıştır.
+  public function frameFailed(error : String) {
+    failed("Kare", error, true);
+  }
+
+  // Hata editörü kapatmaz: bildirim, Uyarılar paneli, günlüğe yığın izi ve sahnenin hemen yedeği (otomatik yedekle
+  // aynı yer; editör kapansa da sonraki açılışta önerilir).
+  public function failed(where : String, error : String, printed = false) {
+    var line = '$where hata verdi: ${firstLine(error)}';
+    if (!printed && error != lastFailure) try Sys.stderr().writeString('Editör hatası ($where): $error\n') catch (_ : Dynamic) {};
+    lastFailure = error;
+    report(line);
+    var backedUp = false;
+    if (backupCooldown <= 0) {
+      backupCooldown = BACKUP_SECONDS;
+      backedUp = document.backupNow();
+    }
+    show('$line. Editör çalışıyor${backedUp ? ", sahnenin yedeği alındı" : ""}; değişiklikleri kaydet.', true);
+  }
+
+  // Uygulama verir: sahne çizilirken hata. Çizim hedefleri bırakılır, ImGui arayüzü yine çizilir (editör görünür kalır,
+  // kayıt yapılabilir). drawInterface: ImGui.render ve ImGui sahnesinin çizimi.
+  public function renderFailed(engine : h3d.Engine, error : haxe.Exception, drawInterface : Void->Void) {
+    while (engine.getCurrentTarget() != null) engine.popTarget();
+    failed("Sahne çizimi", FrameGuard.describe(error));
+    if (FrameGuard.frameOpen()) section("Arayüz çizimi", drawInterface);
+  }
+
+  static function firstLine(text : String) : String {
+    var end = text.indexOf("\n");
+    return end < 0 ? text : text.substr(0, end);
   }
 
   // Asset önizlemeleri ekrana değil dokuya çizilir, bu yüzden kare çizilirken çağrılır.
@@ -240,6 +300,15 @@ class Editor {
   // Kalıcı sorunlar: içe aktarma ve oyun hataları Uyarılar panelinde kalır.
   public function report(message : String) {
     if (messages.indexOf(message) < 0) messages.push(message);
+  }
+
+  // Uyarılar panelinin editör satırları (oyun hataları, editör hataları) ve hata veren paneller: ajan da görür.
+  public function reportedMessages() : Array<String> {
+    return messages.copy();
+  }
+
+  public function failedPanels() : Array<{title : String, error : String}> {
+    return [for (title => error in panelErrors) {title: title, error: firstLine(error)}];
   }
 
   public function isCommandHeld() {

@@ -321,15 +321,22 @@ class SceneDocument {
     autosaveTimer += dt;
     if (autosaveTimer < AUTOSAVE_SECONDS) return;
     autosaveTimer = 0;
+    backupNow();
+  }
+
+  // Otomatik yedek şimdi: süre beklenmez (editörde hata olunca da çağrılır). Yedeklenecek değişiklik yoksa false.
+  public function backupNow() : Bool {
     var commands = editor.commands;
-    if (!commands.isDirty || commands.revision == autosavedRevision) return;
+    if (!commands.isDirty || commands.revision == autosavedRevision) return false;
     try {
       if (!FileSystem.exists(AUTOSAVE_DIRECTORY)) FileSystem.createDirectory(AUTOSAVE_DIRECTORY);
       if (world != null) world.autosave(AUTOSAVE_WORLD);
       else File.saveContent(autosavePath(), SceneFormat.write(scene.toData()));
       autosavedRevision = commands.revision;
+      return true;
     } catch (e : Dynamic) {
       editor.show('Otomatik yedek alınamadı: $e', true);
+      return false;
     }
   }
 

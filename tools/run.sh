@@ -12,6 +12,7 @@ HXML=build-mac.hxml
 C_DIR=bin/c
 OUTPUT=bin/game
 TESTS=
+WITH_ARGS=
 
 if [ "$1" = "editor" ]; then
   HXML=editor-mac.hxml
@@ -22,6 +23,18 @@ if [ "$1" = "editor" ]; then
     echo "hlimgui eksik. Önce sh $TOOLKIT/tools/build-hlimgui.sh çalıştır." >&2
     exit 1
   fi
+  # Eski hlimgui'de kare koruması yok (scene.editor.FrameGuard): sürüm damgası karşılaştırılır.
+  if [ "$(cat "$HL_DIR/hlimgui-surum.txt" 2>/dev/null)" != "$(cat "$TOOLKIT/tools/hlimgui-surum.txt")" ]; then
+    echo "hlimgui eski. Önce sh $TOOLKIT/tools/build-hlimgui.sh çalıştır." >&2
+    exit 1
+  fi
+elif [ "$1" = "ice-aktar" ]; then
+  # Komut satırından içe aktarma (scene.editor.ImportMain): ./run.sh ice-aktar <dosya ya da klasör> ...
+  HXML=$TOOLKIT/import-mac.hxml
+  C_DIR=bin/ice-aktar-c
+  OUTPUT=bin/ice-aktar
+  WITH_ARGS=1
+  shift
 elif [ "$1" = "test" ]; then
   HXML=$TOOLKIT/tests-mac.hxml
   C_DIR=bin/tests-c
@@ -75,5 +88,6 @@ if [ "$1" != "build" ]; then
     "$OUTPUT"
     exec haxe "$TOOLKIT/tests-heaps.hxml"
   fi
+  [ -n "$WITH_ARGS" ] && exec "$OUTPUT" "$@"
   exec "$OUTPUT"
 fi

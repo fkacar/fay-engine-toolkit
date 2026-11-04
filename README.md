@@ -285,6 +285,14 @@ editor.addPanel("Fraksiyonlar", drawFactions);                 // Oyuna özel pa
 ```
 
 - `Main.render` içinde `editor.render(e)` çağrılır, model önizlemeleri orada çizilir.
+- Kare koruması (`scene.editor.FrameGuard`): editörde bir kare yarıda kalınca Dear ImGui sonraki `NewFrame`'de uygulamayı durdurur (assert, abort) ve kaydedilmemiş iş gider. Uygulama dört yer bağlar, şablondaki `Main.hx` örnektir:
+  - `init` içinde `FrameGuard.install()`: Heaps'in hata bildirimi sarılır, hata metni saklanır.
+  - `mainLoop` başında `FrameGuard.beforeFrame()`, sonuç `editor.frameFailed`'e verilir: önceki kare yarıda kaldıysa ImGui toparlanır.
+  - `update` gövdesi `FrameGuard.run` ile, hata `editor.failed`'e verilir.
+  - `render` içinde sahne çizimi `try` içinde, hata `editor.renderFailed`'e verilir: çizim hedefleri bırakılır, ImGui arayüzü yine çizilir.
+  - Editör kendi bölümlerini ve her paneli `FrameGuard.run` ile çizer. Hata veren panel "Yeniden dene"ye kadar durur. Hata bildirimde, Uyarılar panelinde, günlükte ve ajanın `get_warnings` aracında görünür; sahnenin yedeği hemen alınır (`SceneDocument.backupNow`, en çok 10 saniyede bir).
+  - Yerel tarafı `editor/native/imgui_guard.cpp`, hlimgui eklentisine derlenir. Üçüncü taraf hlimgui'ye dokunulmaz: Mac'te `tools/build-hlimgui.sh` kaynak listesine ekler, Windows'ta `tools/hlimgui/CMakeLists.txt` sarmalayıcısı aynı hedefe ekler.
+  - Eklenti değişince `tools/hlimgui-surum.txt` artar. Derleme betikleri damgayı hdll'in yanına yazar; `run.sh editor` ve `run.bat editor` eski hdll'i tanıyıp yeniden derlemeyi söyler. Eski hdll'de yeni yerel işlevler yoktur; HashLink bunu açılışta anlaşılmaz bir hatayla bildirirdi.
 - Editör ikilisi `--play <sahne> --camera x y z x y z` ile oyun olarak açılır, `PlayOptions.parse(Sys.args())` bunu okur. "Buradan oyna" bunu kullanır, çünkü oyun derlemesi kaynakları gömülü taşır ve yeni kaydedilen sahneyi görmez.
 - Kişiye özel ayarlar `.editor/` altındadır ve git'e girmez: son açılanlar, editörde gizlenenler, otomatik yedekler.
 - Görünürlük iki ayrı durumdur. `entity.active` sahneye yazılır ve oyunu etkiler, `entity.hiddenInEditor` yalnızca o bilgisayarda geçerlidir. İkisi bağımsızdır: oyunda kapalı nesne editörde düzenlenebilir kalır.
@@ -294,6 +302,9 @@ editor.addPanel("Fraksiyonlar", drawFactions);                 // Oyuna özel pa
 - `ModelLibrary.load` modeli tek önbellekten verir, kopyalar geometri ve dokuyu paylaşır. Bileşenler `ModelCache` açmamalı.
 - Model başvurusu katalog kimliği ya da dosya yoludur (`scene.ModelRef`). Oyun kataloğu `ModelRef.catalog`'a verir (kimlik → dosya); `ModelLibrary.load`, `animation` ve `exists` başvuruyu kabul eder. Kimlik `[a-z0-9_]`, yol `/` ya da uzantı içerir; eski içerikteki yollar okunmaya devam eder. `ModelRef` Heaps'e bağlı değildir.
 - Editörde `editor.actions.catalog` (`{find, ensure}`) verilirse sahneye bırakılan dosyanın alanına katalog kimliği yazılır; satır yoksa `ensure`'un tablo komutu nesneyle aynı geri alma adımına girer. İçe aktarma (Asset Browser ve ajanın `import_model`'i) da satırı ekler; `import_model` kimliği `catalog` olarak döner, `list_models` dosyaların kimliğini verir. `editor.data.onApplied` her tablo uygulanışında (düzenleme, geri alma, ajan) hemen çağrılır; oyun önbelleğini orada boşaltırsa aynı karedeki okuma yeni tabloyu görür.
+- `SceneInstance.observers`: oyunun sistemleri (fizik gibi) nesnelerin oyunda başlamasını (bileşenler başladıktan sonra) ve silinmesini (bileşenler kapanmadan önce) dinler. Yalnızca oyun kipinde, sahne başlamışken.
+- Komut satırından içe aktarma: `./run.sh ice-aktar <dosya ya da klasör>` (`scene.editor.ImportMain`, `import-mac.hxml`; Windows'ta bayt kodu için `import.hxml`). Pencere açmaz, editörle aynı `AssetImporter.run`; klasördeki modellerin hepsi aktarılır. Katalog satırını oyun ekler.
+- Çarpışma bileşeni (`ColliderComponent`) yalnızca veridir; oyunun fizik servisi `ColliderComponent.bridge`'i (`added`, `removed`, `moved`) verirse bileşen oyunda başlayınca (`onStart`), silinince ve taşınınca haber verir. Sonradan bağlanan servis yüklü arazi hücrelerini `WorldTerrain.loaded()` ile kurar, sonrakileri `WorldView.terrainChanged` ile alır.
 - `FocusGuard.install()` odak kaybında tuşları bırakır. Heaps bunu yapmaz, Cmd+Tab veya Alt+Tab sonrası tuş basılı kalır. Editör kendisi kurar, oyun `init` içinde çağırır.
 - Mac'te HL/C clang ile `-O2 -g` derlenir (`-O0`'dan yaklaşık 7 kat hızlı, derleme birkaç saniye uzun) ve `-fwrapv` şarttır: Haxe'nin Int'i taşınca sarar, C'de işaretli taşma tanımsızdır. `-O1` ve üstünde karma ve rastgele sayı döngüleri bozulur (FNV tohumu her metinde 0 çıkıyordu). `tools/run.sh` bayrağı verir; kendi derleme betiğine de ekle.
 - Heaps kamerası sol ellidir: ekranın sağı bakış yönünün saat yönünün tersindedir. Kamera yönleri kendi vektörleriyle değil, noktanın ekranda gittiği yerle test edilir.

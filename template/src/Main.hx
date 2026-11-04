@@ -7,6 +7,7 @@ import scene.SceneMode;
 import scene.data.SceneFormat;
 #if scene_editor
 import scene.editor.Editor;
+import scene.editor.FrameGuard;
 #end
 
 class Main extends #if scene_editor imgui.ImGuiApp #else hxd.App #end {
@@ -19,6 +20,10 @@ class Main extends #if scene_editor imgui.ImGuiApp #else hxd.App #end {
 
   override function init() {
     super.init();
+    #if scene_editor
+    // Kare koruması: editörde bir kare yarıda kalırsa editör kapanmaz (scene.editor.FrameGuard).
+    FrameGuard.install();
+    #end
     HiDpi.fit(s2d);
     #if scene_editor
     hxd.Res.initLocal();
@@ -54,17 +59,37 @@ class Main extends #if scene_editor imgui.ImGuiApp #else hxd.App #end {
   }
 
   #if scene_editor
+  override function mainLoop() {
+    var failure = FrameGuard.beforeFrame();
+    if (failure != null && editor != null) editor.frameFailed(failure);
+    super.mainLoop();
+  }
+
   override function render(e : h3d.Engine) {
-    if (editor != null) editor.render(e);
-    super.render(e);
-    if (editor != null) editor.afterRender(e);
+    if (editor == null) {
+      super.render(e);
+      return;
+    }
+    var failure = FrameGuard.run(() -> editor.render(e));
+    if (failure != null) editor.failed("Önizleme çizimi", failure);
+    try {
+      super.render(e);
+    } catch (error : haxe.Exception) {
+      editor.renderFailed(e, error, () -> {
+        imgui.ImGui.render();
+        @:privateAccess imguiScene.render(e);
+      });
+    }
+    failure = FrameGuard.run(() -> editor.afterRender(e));
+    if (failure != null) editor.failed("Çizim sonrası", failure);
   }
   #end
 
   override function update(dt : Float) {
     #if scene_editor
     if (editor != null) {
-      editor.draw();
+      var failure = FrameGuard.run(editor.draw);
+      if (failure != null) editor.failed("Oyun", failure);
       return;
     }
     #end

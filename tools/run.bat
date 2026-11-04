@@ -17,6 +17,14 @@ if /i "%~1"=="editor" (
   set BYTECODE=bin\editor.hl
   shift
 )
+rem Komut satirindan ice aktarma (scene.editor.ImportMain): run.bat ice-aktar <dosya ya da klasor> ...
+set WITH_ARGS=
+if /i "%~1"=="ice-aktar" (
+  set HXML=libs\scene-toolkit\import.hxml -hl bin\ice-aktar.hl
+  set BYTECODE=bin\ice-aktar.hl
+  set WITH_ARGS=1
+  shift
+)
 if /i "%~1"=="test" (
   set HXML=libs\scene-toolkit\tests-hl.hxml
   set BYTECODE=bin\tests.hl
@@ -57,11 +65,32 @@ if /i "%HXML%"=="editor.hxml" if not exist "%HL_DIR%\hlimgui.hdll" (
   echo hlimgui eksik. Once libs\scene-toolkit\tools\build-hlimgui.bat calistir.
   goto fail
 )
+rem Eski hlimgui (kare korumasi yok) editoru acilista durdurur: surum damgasi karsilastirilir.
+if /i not "%HXML%"=="editor.hxml" goto hlimgui_ok
+set HLIMGUI_WANTED=
+set HLIMGUI_BUILT=
+set /p HLIMGUI_WANTED=<"libs\scene-toolkit\tools\hlimgui-surum.txt"
+if exist "%HL_DIR%\hlimgui-surum.txt" set /p HLIMGUI_BUILT=<"%HL_DIR%\hlimgui-surum.txt"
+if "%HLIMGUI_WANTED%"=="%HLIMGUI_BUILT%" goto hlimgui_ok
+echo hlimgui eski (surum %HLIMGUI_BUILT%, gereken %HLIMGUI_WANTED%). Once libs\scene-toolkit\tools\build-hlimgui.bat calistir.
+goto fail
+:hlimgui_ok
 
 call haxe %HXML%
 if errorlevel 1 goto fail
 
 if /i "%~1"=="build" exit /b 0
+if not defined WITH_ARGS goto run_plain
+set RUN_ARGS=
+:collect_args
+if "%~1"=="" goto run_with_args
+set RUN_ARGS=%RUN_ARGS% %1
+shift
+goto collect_args
+:run_with_args
+"%HL_DIR%\hl.exe" %BYTECODE%%RUN_ARGS%
+exit /b %errorlevel%
+:run_plain
 "%HL_DIR%\hl.exe" %BYTECODE%
 if errorlevel 1 exit /b %errorlevel%
 rem Testlerde ardindan Heaps'in matematik turlerini isteyen testler (yorumlayicida, tests\heaps).

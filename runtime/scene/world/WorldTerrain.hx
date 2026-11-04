@@ -24,6 +24,13 @@ class WorldTerrain implements GroundHeight {
     cells.remove(cell);
   }
 
+  // Yüklü hücreler, artan sırayla (sonradan bağlanan bir sistem, ör. fizik, var olanları kurar).
+  public function loaded() : Array<Int> {
+    var list = [for (cell in cells.keys()) cell];
+    list.sort((a, b) -> a - b);
+    return list;
+  }
+
   public function contains(x : Float, y : Float) {
     return world.cellAt(x, y) != WorldData.OUTSIDE;
   }

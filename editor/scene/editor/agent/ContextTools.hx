@@ -58,7 +58,7 @@ class ContextTools {
     }, find);
     tool("get_entity", "Bir nesnenin tamamı: dönüşüm, hücre, üst ve alt nesneler, prefab ve farkları, bileşenler ve her alanın Inspector etiketi, değeri, türü, sınırları ve seçenekleri; uyarıları; altında yürünebilirlik; bu nesneye bağlananlar.", {id: {type: "string"}}, args -> entity(args.id), ["id"]);
     tool("get_schema", "Bileşen ve işaretçi türleri, alanları, grupları; tablolar ve sütunları; diyalog düğüm türleri; birimler.", {}, _ -> schema());
-    tool("get_warnings", "Uyarılar panelinin tamamı: nesne, diyalog ve düğüm kimlikleriyle; dışarıda değişen ve çakışan dosyalar.", {}, _ -> warnings());
+    tool("get_warnings", "Uyarılar panelinin tamamı: nesne, diyalog ve düğüm kimlikleriyle; dışarıda değişen ve çakışan dosyalar; editörün yazdığı satırlar (oyun ve editör hataları) ve hata verip duran paneller.", {}, _ -> warnings());
     tool("get_document_text", "Kaydedilmemiş değişiklikler. path verilmezse kaydedilmemiş bütün dosyaların diskle farkı. path verilirse o dosyanın farkı; full true ise editördeki tam metni de (kaydedilince yazılacak hal).", {
       path: {type: "string", description: "res/ ile başlayan yol"}, full: {type: "boolean"},
     }, documentText);
@@ -545,6 +545,9 @@ class ContextTools {
       sceneWarnings: editor.scene.warnings,
       conflicts: [for (conflict in editor.diskGuard.conflicts) {path: conflict.path, units: conflict.units}],
       changedOutside: [for (path in editor.diskGuard.pending.keys()) path],
+      // Editörün yazdığı satırlar (oyun ve editör hataları) ile hata verip duran paneller ("Yeniden dene" bekler).
+      messages: editor.reportedMessages(),
+      failedPanels: editor.failedPanels(),
     };
   }
 
