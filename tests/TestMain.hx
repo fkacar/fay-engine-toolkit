@@ -2374,6 +2374,21 @@ class TestMain {
     state.changeStanding("kasaba", 10);
     state.changeStanding("kasaba", -4);
     equals(state.standingWith("kasaba"), 6, "ilişki birikmeli");
+
+    // Eşya deposu: verilen eşya depoya gider, toplamlar sync ile gelir, dinleyiciler değişeni duyar.
+    var depot = new Map<String, Int>();
+    var heard = [];
+    var stored = new GameState();
+    stored.watch((kind, name, value) -> heard.push('$kind/$name=$value'));
+    stored.store = new FakeStore(depot, stored);
+    stored.give("ekmek", 4);
+    equals(stored.count("ekmek"), 4, "depodan sayılır");
+    equals(depot.get("ekmek"), 4, "depoya gitti");
+    stored.give("ekmek", -4);
+    check(!stored.items.exists("ekmek") && heard.join(" ") == "esya/ekmek=4 esya/ekmek=0", 'dinleyiciler: ${heard.join(" ")}');
+    var before = stored.revision;
+    stored.sync(new Map());
+    equals(stored.revision, before, "değişmeyen toplam yeniden çizdirmez");
   }
 
   static function testValidator() {
@@ -2502,5 +2517,21 @@ class TestMain {
     testPlayOptions();
     Sys.println('$checks kontrol, $failures hata');
     if (failures > 0) Sys.exit(1);
+  }
+}
+
+class FakeStore implements scene.story.GameState.ItemStore {
+  var depot : Map<String, Int>;
+  var state : GameState;
+
+  public function new(depot : Map<String, Int>, state : GameState) {
+    this.depot = depot;
+    this.state = state;
+  }
+
+  public function give(item : String, amount : Int) {
+    var total = (depot.exists(item) ? depot.get(item) : 0) + amount;
+    if (total <= 0) depot.remove(item) else depot.set(item, total);
+    state.sync(depot.copy());
   }
 }

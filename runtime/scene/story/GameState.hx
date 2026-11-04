@@ -10,6 +10,10 @@ class GameState {
   // İz için: tür (esya, degisken, iliski), ad, yeni değer.
   public var onChange : Null<String->String->Int->Void>;
 
+  // Eşyaların asıl yeri (oyunda ekibin envanterleri): varsa give ona gider, items deponun toplamıdır (depo her
+  // değişiklikte sync çağırır). Yoksa (editörde diyalog oynatma, testler) items kendi sayacıdır.
+  public var store : Null<ItemStore>;
+
   // onChange tek kişiliktir (iz onu kullanır); kayıt günlüğü gibi başka dinleyiciler buraya eklenir.
   var watchers : Array<String->String->Int->Void> = [];
 
@@ -38,11 +42,33 @@ class GameState {
   }
 
   public function give(item : String, amount : Int) {
+    if (store != null) {
+      store.give(item, amount);
+      return;
+    }
     var total = count(item) + amount;
     if (total <= 0) items.remove(item);
     else items.set(item, total);
     revision++;
     changed("esya", item, count(item));
+  }
+
+  // Deponun toplamları: değişen her eşya için dinleyicilere haber verilir.
+  public function sync(totals : Map<String, Int>) {
+    var any = false;
+    for (name => value in totals) {
+      if (count(name) == value) continue;
+      if (value <= 0) items.remove(name) else items.set(name, value);
+      any = true;
+      changed("esya", name, count(name));
+    }
+    for (name in [for (key in items.keys()) key]) {
+      if (totals.exists(name)) continue;
+      items.remove(name);
+      any = true;
+      changed("esya", name, 0);
+    }
+    if (any) revision++;
   }
 
   public function flag(name : String) {
@@ -64,4 +90,9 @@ class GameState {
     revision++;
     changed("iliski", faction, standingWith(faction));
   }
+}
+
+// Eşya deposu: verilen (eksi ise alınan) eşyayı yerine koyar, sonra GameState.sync ile toplamları bildirir.
+interface ItemStore {
+  function give(item : String, amount : Int) : Void;
 }

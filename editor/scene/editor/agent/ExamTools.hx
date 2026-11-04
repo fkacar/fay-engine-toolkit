@@ -20,6 +20,8 @@ class ExamTools {
   // Görevin sınav dışında bıraktığı test dosyaları silinmez, buraya taşınır.
   public static inline var LEFTOVERS = ".editor/sinav-artiklari";
   static inline var REACH = 2.;
+  // Oyunun kendi kontrolleri (örneğin bir kabın içinde ne olduğu): tür adı → kontrol. Yeni nesneler verilir.
+  public static var checks = new Map<String, (spec : Dynamic, created : Array<scene.Entity>) -> {ok : Bool, detail : String}>();
 
   var editor : Editor;
   var server : AgentServer;
@@ -229,7 +231,14 @@ class ExamTools {
           : [for (id in editor.dialogs.ids()) if (base.dialogs.indexOf(id) < 0) editor.dialogs.dialogs.get(id)];
         var ok = Lambda.exists(fresh, dialog -> Lambda.foreach(types, type -> Lambda.exists(dialog.nodes, node -> node.type == type)));
         return {ok: ok, detail: fresh.length == 0 ? "yeni diyalog yok" : [for (dialog in fresh) '${dialog.id}: ${[for (node in dialog.nodes) node.type].join(" ")}'].join("; ")};
+      case "table_value":
+        var table = editor.data.tables.get(spec.table);
+        var row = table == null ? null : table.find(spec.row);
+        var value : Dynamic = row == null ? null : row.get(spec.column);
+        var ok = Std.isOfType(spec.value, Float) && Std.isOfType(value, Float) ? Math.abs((spec.value : Float) - (value : Float)) < 1e-6 : value == spec.value;
+        return {ok: ok, detail: '${spec.table}.${spec.row}.${spec.column} = $value'};
       default:
+        if (checks.exists(spec.type)) return checks.get(spec.type)(spec, created);
         throw 'bilinmeyen kontrol: ${spec.type}';
     }
   }
