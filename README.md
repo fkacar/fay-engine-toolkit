@@ -293,14 +293,23 @@ editor.addPanel("Fraksiyonlar", drawFactions);                 // Oyuna özel pa
 - ImGui çizim listesi renkleri `0xAARRGGBB` biçimindedir.
 - hlimgui bağlamasında iki tuzak var: `selectable` sabit `true`/`false` ile çöker, değer değişkenle verilir. `getColorU32(ImGuiCol.X)` saydam döner, `getStyleColorVec4` kullanılır.
 
-## Retina
+## Yüksek DPI (Retina ve Windows ölçeği)
 
-Mac derlemeleri `hidpi.hxml` ile Retina ekranda gerçek piksel boyutunda çizer. Heaps bunu desteklemediği için `hidpi/hxd/Window.hl.hx`, Heaps 2.1.0 dosyasının yamalı kopyasıdır. Windows derlemesine girmez.
+Derlemeler `hidpi.hxml` ile gerçek piksel boyutunda çizer: Mac'te Retina, Windows'ta %125, %150, %200 gibi ekran ölçekleri. Heaps bunu desteklemediği için `hidpi/hxd/Window.hl.hx`, Heaps 2.1.0 dosyasının yamalı kopyasıdır. hlsdl 1.16 SDL3 kullanır, iki sistem farklı davranır (SDL3 README-highdpi):
 
-- `hidpi.hxml`, Mac `.hxml` dosyalarında `common.hxml`'den önce gelmelidir. Sonra gelirse Haxe, Heaps'in kendi dosyasını seçer ve derleme `pixelDensity` hatası verir.
-- Oyun `init` içinde `HiDpi.fit(s2d)` çağırır. `s2d` eski birimlerini korur, `s3d` ve `engine.width` gerçek pikseldir.
+| | Pencere koordinatı | `pixelDensity` | `contentScale` (ekranın ölçeği) |
+| --- | --- | --- | --- |
+| Mac Retina | nokta | 2 | 2 |
+| Windows %150 | piksel | 1 | 1,5 |
+
+- `hidpi.hxml`, bütün `.hxml` dosyalarında (Mac ve Windows) `common.hxml`'den önce gelmelidir. Sonra gelirse Haxe, Heaps'in kendi dosyasını seçer ve derleme `pixelDensity` hatası verir.
+- Yama nokta–piksel dönüşümünü yalnızca Mac'te yapar (`pixelDensity`); Windows'ta pencere zaten pikseldir. Arayüzün büyütme payı ikisinde de `contentScale`'dir.
+- `HiDpi.prepare()` `main` içinde, SDL açılmadan çağrılır: Windows'ta süreç ekran başına DPI'a duyarlı açılır (`SDL_WINDOWS_DPI_AWARENESS=permonitorv2`), işletim sistemi görüntüyü bulanık büyütmez.
+- Oyun `init` içinde `HiDpi.fit(s2d, enKüçükYükseklik)` çağırır. `s2d` eski birimlerini korur, `s3d` ve `engine.width` gerçek pikseldir. `HiDpi.density` sahnenin ölçeğidir: oyunun seçimi (`HiDpi.choice`, sonra `HiDpi.refresh()`), yoksa ekranın ölçeği; sahne verilen yükseklikten kısa kalacaksa kısılır.
+- Pencere boyutu ölçeksiz birimle seçilir, piksel boyutu için `HiDpi.displayScale` ile çarpılır; masaüstü boyutuyla karşılaştırırken `displayScale / pixelDensity` (Mac'te 1, Windows'ta ölçek). Ölçekle büyüyen pencere masaüstünü aşabilir (%150 ölçekli 1080p ekranda 1280x720 → 1920x1080): oyun başlık ve görev çubuğu payıyla sığacak kadar küçültmeli, `fit`'e verilen en küçük yükseklik arayüzü yine sığdırır.
 - Editör `imguiScene` sahnesini yakınlaştırmaz, çünkü hlimgui kırpmayı ham pikselle yapar. Font ve stil `HiDpi.density` ile büyür.
-- Sabit boyutlu bitmap fontlar `s2d`'de yumuşatılarak büyütülür. Keskin olmaları için 2x atlas gerekir.
+- Sabit boyutlu bitmap fontlar `s2d`'de yumuşatılarak büyütülür. Keskin olmaları için 2x atlas gerekir; ölçek 1'den büyükse 2x atlası yarım ölçekle çizmek (küçültmek) keskin kalır.
+- Windows davranışı belgeden (SDL3) kuruldu, Windows'ta denenmedi.
 - Heaps yükseltilirken yama yeni dosyaya yeniden uygulanır, değişen satırlar `HiDPI` ile işaretlidir.
 - Mac `.app` paketinin `Info.plist` dosyasında `NSHighResolutionCapable` açık olmalıdır.
 

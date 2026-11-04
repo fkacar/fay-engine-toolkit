@@ -85,8 +85,14 @@ class Window {
 	#end
 	var windowWidth = 800;
 	var windowHeight = 600;
-	// HiDPI: SDL pencereyi noktayla, Heaps pikselle ölçer. Retina'da bir nokta iki pikseldir.
+	// HiDPI: Mac'te SDL pencereyi noktayla, Heaps pikselle ölçer; Retina'da bir nokta iki pikseldir. Windows'ta
+	// (SDL3) pencere koordinatları zaten pikseldir, yoğunluk 1 kalır.
 	public var pixelDensity(default, null) = 1.;
+	// HiDPI: ekranın ölçeği, arayüzün büyütme payı. Mac Retina'da 2 (yoğunlukla aynı), Windows'ta kullanıcının ölçek
+	// ayarı (%150 → 1,5). SDL3'ün "display scale" değeri, bkz. SDL3 README-highdpi.
+	public var contentScale(default, null) = 1.;
+	// HiDPI: nokta koordinatı kullanan sistem (Mac). Windows ve Linux X11'de pencere koordinatı pikseldir.
+	static var usesPoints = Sys.systemName() == "Mac";
 	// Yatay kaydırma: hlsdl değeri mouseX alanına yazar, Heaps atar. Okuyan sıfırlar.
 	public var horizontalWheel = 0;
 	var curMouseX = 0;
@@ -194,12 +200,15 @@ class Window {
 
 	// HiDPI: hlsdl piksel boyutu olaylarını iletmez, pencere başka ekrana geçince burada yakalanır.
 	function syncPixelSize() : Void {
-		var density = window.displayScale;
+		var scale = window.displayScale;
+		if( !(scale > 0) ) scale = 1;
+		var density = usesPoints ? scale : 1.;
 		var width = Math.round(window.width * density);
 		var height = Math.round(window.height * density);
-		if( density == pixelDensity && width == windowWidth && height == windowHeight )
+		if( density == pixelDensity && scale == contentScale && width == windowWidth && height == windowHeight )
 			return;
 		pixelDensity = density;
+		contentScale = scale;
 		windowWidth = width;
 		windowHeight = height;
 		onResize(null);
