@@ -473,6 +473,15 @@ class AssetBrowser {
     return 'klip_$n';
   }
 
+  // Katalog varsa içe aktarılan modelin satırı: yoksa eklenir (ayrı geri alma adımı). Kimlik döner.
+  function catalogRow(target : String) : Null<String> {
+    var catalog = editor.actions.catalog;
+    if (catalog == null) return null;
+    var reference = catalog.ensure(StringTools.startsWith(target, ROOT + "/") ? target.substr(ROOT.length + 1) : target);
+    if (reference.command != null) editor.commands.execute(reference.command);
+    return reference.value + (reference.command != null ? " (yeni satır)" : "");
+  }
+
   function importModel(source : String) {
     var result = editor.importer.run(source);
     for (problem in result.problems) editor.report(problem);
@@ -482,7 +491,8 @@ class AssetBrowser {
     }
     pending.remove(source);
     enter(Path.directory(result.target));
-    editor.show('İçe aktarıldı: ${result.target} (${result.triangles} üçgen, ${result.parts} parça${result.trimmed > 0 ? ", " + result.trimmed + " üçgen kırpıldı" : ""})');
+    var catalog = catalogRow(result.target);
+    editor.show('İçe aktarıldı: ${result.target} (${result.triangles} üçgen, ${result.parts} parça${result.trimmed > 0 ? ", " + result.trimmed + " üçgen kırpıldı" : ""})${catalog == null ? "" : ", katalog: " + catalog}');
   }
 
   function drawTiles() {

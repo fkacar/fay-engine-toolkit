@@ -28,6 +28,12 @@ typedef AssetType = {
   var field : String;
 }
 
+// Dosya (res'e göre yol) → katalog kimliği. ensure'un komutu satırı ekler; null ise satır zaten var.
+typedef AssetCatalog = {
+  var find : String -> Null<String>;
+  var ensure : String -> {value : String, ?command : scene.editor.Command};
+}
+
 // Panellerin, kısayolların ve menünün ortak kullandığı sahne işlemleri.
 class SceneActions {
   static inline var PASTE_OFFSET = 2.;
@@ -41,6 +47,10 @@ class SceneActions {
 
   // Zemin oyuna özeldir (arazi, kat...). Oyun bunu verir, verilmezse z = 0 düzlemi kullanılır.
   public var groundRay : Null<Ray->Null<Point>>;
+
+  // Model kataloğu (oyun verir): bırakılan ya da içe aktarılan dosyanın katalog kimliği. find yalnızca arar;
+  // ensure satır yoksa ekleyen tablo komutunu da verir (çalıştırmaz), bırakma onu aynı geri alma adımına koyar.
+  public var catalog : Null<AssetCatalog>;
 
   var editor : Editor;
   var assetTypes = new Map<String, AssetType>();
@@ -148,10 +158,18 @@ class SceneActions {
     var item = new EntityData(Guid.make(), Path.withoutExtension(Path.withoutDirectory(path)));
     item.position = [place.x, place.y, place.z];
     var component = new ComponentData(type.component);
-    component.fields.set(type.field, path);
+    // Katalog varsa alana dosya değil satır kimliği yazılır; satır yoksa aynı adımda eklenir.
+    var reference = catalog == null ? null : catalog.ensure(path);
+    component.fields.set(type.field, reference == null ? path : reference.value);
     item.components.push(component);
 
-    var entity = add([item], "Model ekle")[0];
+    var entity = if (reference != null && reference.command != null) {
+      var command = new AddEntitiesCommand(editor.scene, [item], "Model ekle");
+      editor.commands.execute(new GroupCommand("Model ekle", [reference.command, command]));
+      editor.selection.set(command.entities);
+      editor.show('Katalog satırı eklendi: ${reference.value} ($path)');
+      command.entities[0];
+    } else add([item], "Model ekle")[0];
     if (hit != null) sitOnGround(entity);
   }
 

@@ -109,9 +109,9 @@ class EditTools {
         editor.releaseIds.map(args.from, args.to, old.name);
         ({mapped: args.from, to: args.to, revision: editor.commands.revision} : Dynamic);
       }, false, ["from"]);
-    tool("list_models", "Modeller. models: res altındaki yerleştirilebilir modeller; model bileşeninin path alanına bu yol yazılır. notImported: assets altında olup içe aktarılmamış veya kaynağı ya da ayarı (klasör ayarı dahil) sonradan değişmiş modeller (FBX, GLB, glTF, OBJ), import_model ile alınır.", {}, _ -> listModels(), true);
+    tool("list_models", "Modeller. models: res altındaki yerleştirilebilir modeller. catalog: dosya → model kataloğundaki kimlik (oyun kataloğu kullanıyorsa); model alanlarına dosya değil bu kimlik yazılır, kataloğu olmayan dosya için import_model satırı ekler. notImported: assets altında olup içe aktarılmamış veya kaynağı ya da ayarı (klasör ayarı dahil) sonradan değişmiş modeller (FBX, GLB, glTF, OBJ), import_model ile alınır.", {}, _ -> listModels(), true);
     server.add({name: "import_model", readOnly: false, run: importModel,
-      description: "assets altındaki bir modeli (FBX; GLB, glTF ve OBJ Blender'la çevrilir) Asset Browser'daki Model içe aktar gibi dönüştürür, res/models altına yazar (assets/models/mock altındakiler res/models/mock altına). Dosya işidir, geri alma adımı değildir; yeniden alınca sahnelerdeki yol değişmez. Büyük modelde editör bir süre tepki vermez. Dönen path'i model bileşenine yaz. "
+      description: "assets altındaki bir modeli (FBX; GLB, glTF ve OBJ Blender'la çevrilir) Asset Browser'daki Model içe aktar gibi dönüştürür, res/models altına yazar (assets/models/mock altındakiler res/models/mock altına). Dosya işidir, geri alma adımı değildir; yeniden alınca sahnelerdeki yol değişmez. Büyük modelde editör bir süre tepki vermez. Oyun model kataloğu kullanıyorsa model katalogda yoksa satırı eklenir (tek Ajan: adımı) ve catalog kimliği döner: model alanlarına bu kimliği yaz, path'i değil. Modeli her yerde değiştirmek için katalog satırının dosyasını değiştir (edit_table). "
         + "Ayarlar kaynağın yanındaki <ad>.aktarim.json'a yazılır; folder verilirse klasör ayarına (klasor.aktarim.json): o klasör ve alt klasörlerdeki bütün modeller onu kullanır, modelin kendi dosyasındaki aynı adlı klip ve nokta onu ezer. Aynı iskeletli bir paketin klipleri ve eklem eşlemesi böyle bir kez yazılır; klasördeki öbür modeller list_models'te notImported görünür, onları da al. "
         + "trim verilirse kaynağın yanındaki .aktarim.json'a yazılır ve kutuların içinde kalan üçgenler atılır (yapay zekâ modellerindeki yer plakası, havada kalan parça); [] kırpmayı kaldırır. Kutuları model_info'nun sınırlarına ve taban haritasına göre seç. "
         + "sockets takma noktalarıdır, aynı dosyaya yazılır; [] verilirse iskeletli modelde varsayılanlar (sag_el, sol_el, sirt, bel, bas) kullanılır. Sonucu preview_character ile gözle denetle.",
@@ -582,7 +582,12 @@ class EditTools {
     var models = [];
     collectModels(RESOURCE_DIRECTORY, models);
     models.sort(Reflect.compare);
-    return {models: models, notImported: editor.importer.pending()};
+    var catalog : Dynamic = {};
+    if (editor.actions.catalog != null) for (model in models) {
+      var id = editor.actions.catalog.find(model);
+      if (id != null) Reflect.setField(catalog, model, id);
+    }
+    return {models: models, catalog: catalog, notImported: editor.importer.pending()};
   }
 
   function collectModels(directory : String, found : Array<String>) {
@@ -649,7 +654,14 @@ class EditTools {
       editor.show('İçe aktarıldı: ${result.target} (${result.triangles} üçgen, ${result.parts} parça${result.trimmed > 0 ? ", " + result.trimmed + " üçgen kırpıldı" : ""})');
       var info = AssetImporter.infoPath(result.target);
       var sockets : Dynamic = FileSystem.exists(info) ? haxe.Json.parse(sys.io.File.getContent(info)).sockets : null;
-      return {value: {source: source, path: result.target.substr(RESOURCE_DIRECTORY.length + 1), triangles: result.triangles, parts: result.parts, trimmed: result.trimmed, clips: result.clips, sockets: sockets == null ? [] : sockets, problems: result.problems}};
+      var path = result.target.substr(RESOURCE_DIRECTORY.length + 1);
+      var catalog : Null<String> = null;
+      if (editor.actions.catalog != null) {
+        var reference = editor.actions.catalog.ensure(path);
+        if (reference.command != null) editor.commands.execute(new GroupCommand('Ajan: katalog satırı ${reference.value}', [reference.command]));
+        catalog = reference.value;
+      }
+      return {value: {source: source, path: path, catalog: catalog, triangles: result.triangles, parts: result.parts, trimmed: result.trimmed, clips: result.clips, sockets: sockets == null ? [] : sockets, problems: result.problems}};
     }};
   }
 

@@ -2167,6 +2167,22 @@ class TestMain {
     equals(scene.JointNames.fromData(null), null, "eşlemesiz bilgi dosyası");
   }
 
+  // Model başvurusu: katalog kimliği dosyaya çözülür, yol olduğu gibi kalır (eski içerik, modlar).
+  static function testModelRef() {
+    var saved = scene.ModelRef.catalog;
+    scene.ModelRef.catalog = null;
+    equals(scene.ModelRef.file("models/a/a.hmd"), "models/a/a.hmd", "katalog yokken yol");
+    equals(scene.ModelRef.file("sovalye"), "", "katalog yokken kimlik çözülmez");
+    scene.ModelRef.catalog = id -> id == "sovalye" ? "models/mock/iv_knight/iv_knight.hmd" : null;
+    equals(scene.ModelRef.file("sovalye"), "models/mock/iv_knight/iv_knight.hmd", "kimlik dosyaya çözülür");
+    equals(scene.ModelRef.file("yok_boyle"), "", "katalogda olmayan kimlik");
+    equals(scene.ModelRef.file("models/lamborghini/lamborghini.fbx"), "models/lamborghini/lamborghini.fbx", "eski yol katalogdan geçmez");
+    equals(scene.ModelRef.file(""), "", "boş başvuru");
+    equals(scene.ModelRef.file(null), "", "başvuru yok");
+    check(scene.ModelRef.isPath("araba.fbx") && !scene.ModelRef.isPath("kisa_kilic"), "uzantı yol sayılır, kimlik sayılmaz");
+    scene.ModelRef.catalog = saved;
+  }
+
   // İçe aktarma ayarları: klip, boy ve kutu kuralları; klasör ayarı birleştirme; eski dosyanın kararlı yazılması.
   static function testImportSettings() {
     function fails(run : () -> Void, label : String, ?pos : haxe.PosInfos) check(try { run(); false; } catch (e : Dynamic) true, label, pos);
@@ -2584,6 +2600,7 @@ class TestMain {
     testForgetCommands();
     testJointNames();
     testImportSettings();
+    testModelRef();
     testBrushes();
     testBrushLockedEdges();
     testScatterBrush();
