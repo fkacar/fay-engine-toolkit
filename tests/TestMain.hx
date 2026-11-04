@@ -1565,6 +1565,7 @@ class TestMain {
     sys.FileSystem.deleteDirectory(other.root);
     equals(slots.saves(campaign.id).filter(e -> e.kind == scene.save.SaveSlots.AUTO).length, 5, "beş otomatik yuva");
     equals(scene.save.SaveSlots.kindOf("elle_2026-11-03_120000.kayit"), scene.save.SaveSlots.MANUAL, "elle kayıt türü");
+    equals(scene.save.SaveSlots.kindOf("cikis.kayit"), scene.save.SaveSlots.EXIT, "çıkış kaydı türü");
     for (name in sys.FileSystem.readDirectory('$dir/${campaign.id}')) sys.FileSystem.deleteFile('$dir/${campaign.id}/$name');
     sys.FileSystem.deleteDirectory('$dir/${campaign.id}');
     sys.FileSystem.deleteDirectory(dir);

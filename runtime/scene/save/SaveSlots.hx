@@ -17,6 +17,9 @@ class SaveSlots {
   public static inline var QUICK = "hizli";
   public static inline var AUTO = "oto";
   public static inline var IRONMAN = "ironman";
+  // Çıkışta ve ana menüye dönüşte alınan kayıt: tek yuva, otomatik kayıtların zaman çizgisine girmez, hiçbir kaydı
+  // silmez (eski bir otomatik kaydı açıp çıkmak yenilerini götürmesin).
+  public static inline var EXIT = "cikis";
   // Beş dönüşümlü otomatik yuva; oyun tek zaman çizgisini kendisi korur (docs/KAYIT_PLANI.md, Otomatik kayıt yuvaları).
   public static inline var AUTO_COUNT = 5;
   public static inline var MANUAL_LIMIT = 50;
@@ -155,14 +158,14 @@ class SaveSlots {
           }
         }
         oldest;
-      case QUICK, IRONMAN: '$folder/$kind.$EXTENSION';
+      case QUICK, IRONMAN, EXIT: '$folder/$kind.$EXTENSION';
       default: throw 'bilinmeyen kayıt türü: $kind';
     };
   }
 
   public static function kindOf(name : String) : String {
     var base = Path.withoutExtension(Path.withoutDirectory(name));
-    for (kind in [MANUAL, AUTO, QUICK, IRONMAN]) if (base == kind || StringTools.startsWith(base, kind + "_")) return kind;
+    for (kind in [MANUAL, AUTO, QUICK, IRONMAN, EXIT]) if (base == kind || StringTools.startsWith(base, kind + "_")) return kind;
     return MANUAL;
   }
 
