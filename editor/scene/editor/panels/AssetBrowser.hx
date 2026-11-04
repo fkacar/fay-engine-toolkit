@@ -39,6 +39,11 @@ class AssetBrowser {
   var settings = new ImportSettings();
   var joints : Array<String> = [];
   var importedDefaults : Array<ImportSettings.SocketSpec> = [];
+  // Açık ayarın klasör dosyalarıyla birleşik hali (bilgi için), modelin klip adları (düğmeyle okunur),
+  // içe aktarmanın bulduğu eklem eşlemesi.
+  var effective = new ImportSettings();
+  var takes : Null<Array<String>>;
+  var resolvedJoints = new Map<String, String>();
   var importing : Null<String>;
   var importWait = 0;
   var images = new Map<String, h3d.mat.Texture>();
@@ -124,6 +129,7 @@ class AssetBrowser {
       ImGui.sameLine();
       var saved = try ImportSettings.read(source) catch (e : Dynamic) null;
       var summary = saved == null ? "Ayarlar (bozuk)" : saved.trim.length + saved.clips.length + saved.sockets.length == 0 ? "Ayarlar" : 'Ayarlar (${saved.trim.length} kutu, ${saved.clips.length} klip, ${saved.sockets.length} nokta)';
+      if (saved != null && ImportSettings.folderFiles(source).length > 0) summary += " + klasör";
       if (ImGui.smallButton(summary)) {
         if (trimSource == source) trimSource = null;
         else {
@@ -131,6 +137,9 @@ class AssetBrowser {
           settings = saved == null ? new ImportSettings() : saved;
           joints = importedJoints(source);
           importedDefaults = importedSockets(source);
+          effective = try ImportSettings.effective(source) catch (e : Dynamic) new ImportSettings();
+          takes = null;
+          resolvedJoints = importedJointMap(source);
         }
       }
       // Ayarlar uzayabilir (kutular, klipler, takma noktaları): kaydırılan bir alanda, pencere ekrandan taşmasın.
@@ -151,6 +160,7 @@ class AssetBrowser {
   // Klipler: başka FBX'lerden alınıp bu modele eklenir (aynı iskelet). Karakter durma, yurume, kosma arar.
   function drawSettings(source : String) {
     ImGui.indent();
+    drawInherited();
     ImGui.text("Kırpma");
     ImGui.textDisabled("Kutuların içinde kalan üçgenler içe aktarırken atılır. Birimler modelin kendisinin, Z yukarı.");
     var trimBoxes = settings.trim;
@@ -183,7 +193,16 @@ class AssetBrowser {
     if (ImGui.smallButton("+ Kutu")) trimBoxes.push({min: [0., 0., 0.], max: [0., 0., 0.]});
     ImGui.separator();
     ImGui.text("Klipler");
-    ImGui.textDisabled("Aynı iskeletle üretilmiş FBX'lerin animasyonu bu modele eklenir. Karakter durma, yurume, kosma, hizli_kosma adlarını kullanır; silahlı set _tufek gibi türün ekiyle. Kollar seçilirse kollar o klibin ilk karesindeki duruşta kalır.");
+    ImGui.sameLine();
+    // Modelin kendi dosyasındaki klip adları (çok klipli paket): okununca klip adı kutusu listeye döner.
+    if (takes == null) {
+      if (ImGui.smallButton("Klip adlarını oku")) {
+        try takes = editor.importer.takesOfSource(source)
+        catch (e : Dynamic) editor.show('Klip adları okunamadı: $e', true);
+      }
+    } else ImGui.textDisabled('(dosyada ${takes.length} klip)');
+    ImGui.textDisabled("Aynı iskeletle üretilmiş FBX'lerin ya da modelin kendi dosyasının (kendi dosyası) animasyonu bu modele eklenir; çok klipli dosyada üçüncü kutu klibin adıdır (Walk_Loop). Karakter durma, yurume, kosma, hizli_kosma adlarını kullanır; silahlı set _tufek gibi türün ekiyle. Kollar seçilirse kollar o klibin ilk karesindeki duruşta kalır.");
+    var fbxSources = [for (candidate in sources) if (candidate != source && Path.extension(candidate).toLowerCase() == "fbx") candidate];
     var gone = -1;
     for (i in 0...settings.clips.length) {
       var clip = settings.clips[i];
@@ -195,17 +214,30 @@ class AssetBrowser {
       ImGui.sameLine();
       ImGui.pushItemWidth(280 * editor.interfaceScale);
       // Kutuda dosya adı görünür; aynı klasördeki klipler ayırt edilsin. Tam yol listede.
-      if (ImGui.beginCombo("##kaynak", clip.source == "" ? "(FBX seç)" : Path.withoutDirectory(clip.source))) {
-        for (candidate in sources) if (candidate != source && ImGui.selectable(candidate, candidate == clip.source)) clip.source = candidate;
+      if (ImGui.beginCombo("##kaynak", clip.source == "" ? "(kendi dosyası)" : Path.withoutDirectory(clip.source))) {
+        if (ImGui.selectable("(kendi dosyası)", clip.source == "")) clip.source = "";
+        for (candidate in fbxSources) if (ImGui.selectable(candidate, candidate == clip.source)) clip.source = candidate;
         ImGui.endCombo();
       }
+      ImGui.popItemWidth();
+      ImGui.sameLine();
+      // Klip adı: kendi dosyasının adları okunduysa listeden, yoksa elle (başka dosyanın adları için de elle).
+      ImGui.pushItemWidth(170 * editor.interfaceScale);
+      var take = clip.take == null ? "" : clip.take;
+      if (clip.source == "" && takes != null) {
+        if (ImGui.beginCombo("##take", take == "" ? "(klip seç)" : take)) {
+          for (candidate in takes) if (ImGui.selectable(candidate, candidate == take)) clip.take = candidate;
+          ImGui.endCombo();
+        }
+      } else if (ImGui.inputText("##take", take)) clip.take = take == "" ? null : take;
+      if (ImGui.isItemHovered()) ImGui.setTooltip("Klip adı (take): dosyada birden çok klip varsa hangisi. Boşsa ilk klip.");
       ImGui.popItemWidth();
       ImGui.sameLine();
       // Kollar: seçilirse kollar o klibin ilk karesindeki duruşta kalır (silahlı set türetmek için).
       ImGui.pushItemWidth(220 * editor.interfaceScale);
       if (ImGui.beginCombo("##kollar", clip.arms == null || clip.arms == "" ? "(kollar klipten)" : "Kollar: " + Path.withoutDirectory(clip.arms))) {
         if (ImGui.selectable("(kollar klipten)", clip.arms == null || clip.arms == "")) clip.arms = null;
-        for (candidate in sources) if (candidate != source && ImGui.selectable(candidate, candidate == clip.arms)) clip.arms = candidate;
+        for (candidate in fbxSources) if (ImGui.selectable(candidate, candidate == clip.arms)) clip.arms = candidate;
         ImGui.endCombo();
       }
       ImGui.popItemWidth();
@@ -218,18 +250,123 @@ class AssetBrowser {
     ImGui.separator();
     drawSockets(source);
     ImGui.separator();
+    drawJoints();
+    ImGui.separator();
+    drawModel(source);
+    ImGui.separator();
     if (ImGui.smallButton("Kaydet")) {
       try {
         var checked = new ImportSettings();
         checked.trim = [for (box in trimBoxes) ModelTrim.check(box)];
         checked.clips = [for (clip in settings.clips) ImportSettings.checkClip(clip)];
         checked.sockets = [for (socket in settings.sockets) ImportSettings.checkSocket(socket)];
+        for (standard => actual in settings.joints) if (actual != "") checked.joints.set(standard, actual);
+        checked.length = settings.length == null ? null : ImportSettings.checkLength(settings.length);
+        checked.grip = settings.grip;
+        checked.blender = settings.blender;
         checked.write(source);
+        effective = ImportSettings.effective(source);
         pending = editor.importer.pending();
         editor.show('Ayarlar kaydedildi: ${ImportSettings.path(source)}. Modeli yeniden al');
       } catch (e : Dynamic) editor.show('Ayarlar kaydedilemedi: $e', true);
     }
     ImGui.unindent();
+  }
+
+  // Klasör ayarları (klasor.aktarim.json): bu modele de uygulanır; buradaki aynı adlı klip ve nokta onları ezer.
+  function drawInherited() {
+    if (effective.inherited.length == 0) return;
+    ImGui.text("Klasör ayarı");
+    for (file in effective.inherited) ImGui.textDisabled(file);
+    var own = [for (clip in settings.clips) clip.name => true];
+    var clips = [for (clip in effective.clips) if (!own.exists(clip.name)) clip.name + (clip.take == null ? "" : " (" + clip.take + ")")];
+    var ownSockets = [for (socket in settings.sockets) socket.name => true];
+    var sockets = [for (socket in effective.sockets) if (!ownSockets.exists(socket.name)) socket.name];
+    if (clips.length > 0) ImGui.textWrapped("Klasörden klipler: " + clips.join(", "));
+    if (sockets.length > 0) ImGui.textWrapped("Klasörden takma noktaları: " + sockets.join(", "));
+    ImGui.textDisabled("Bu dosyadaki aynı adlı klip, nokta ve alanlar klasör ayarını ezer.");
+    ImGui.separator();
+  }
+
+  // Modelin kendisi: boy ve tutamak tahmini (iskeletsiz modeller; model alınmışsa iskeletlide gizli), Blender'dan geçirme.
+  function drawModel(source : String) {
+    ImGui.text("Model");
+    if (joints.length == 0) drawRigid();
+    settings.blender = choice("Blender'dan geçir", "blender", settings.blender, effective.blender,
+      "FBX önce Blender'la yeniden yazılır (başka aracın ölçeğiyle gelen dosya). GLB, glTF ve OBJ her zaman Blender'la çevrilir.");
+    if (BlenderConverter.handles(source)) ImGui.textDisabled("Bu dosya Blender'la FBX'e çevrilir (Blender kurulu olmalı).");
+  }
+
+  function drawRigid() {
+    var sized = settings.length != null;
+    if (ImGui.checkbox("En uzun kenar (m)", sized)) settings.length = sized ? (effective.length != null ? effective.length : 1.) : null;
+    if (ImGui.isItemHovered()) ImGui.setTooltip("İskeletsiz model (silah, eşya) bu boya ölçeklenir. Silah paketleri 1 birimlik kutuya sığdırılmış gelir.");
+    if (settings.length != null) {
+      ImGui.sameLine();
+      ImGui.pushItemWidth(80 * editor.interfaceScale);
+      var value : Float = settings.length;
+      if (ImGui.inputDouble("##boy", value, 0, 0, "%.2f")) settings.length = value;
+      ImGui.popItemWidth();
+    } else if (effective.length != null) {
+      ImGui.sameLine();
+      ImGui.textDisabled('klasörden ${effective.length} m');
+    }
+    settings.grip = choice("Tutamak tahmini", "tutamak", settings.grip, effective.grip,
+      "İskeletsiz modelde \"tutamak\" takma noktası şekilden tahmin edilir: ince uç sap, Z saptan başa, X başın en geniş yönü. Elle verilen tutamak önce gelir.");
+  }
+
+  // Üç durum: klasörden (boş), evet, hayır.
+  function choice(label : String, id : String, value : Null<Bool>, inherited : Null<Bool>, tip : String) : Null<Bool> {
+    function name(v : Null<Bool>) return v == null ? "klasörden (" + (inherited == true ? "evet" : "hayır") + ")" : v ? "evet" : "hayır";
+    ImGui.pushItemWidth(160 * editor.interfaceScale);
+    var result = value;
+    if (ImGui.beginCombo('$label##$id', name(value))) {
+      for (option in [null, true, false]) if (ImGui.selectable(name(option), option == value)) result = option;
+      ImGui.endCombo();
+    }
+    if (ImGui.isItemHovered()) ImGui.setTooltip(tip);
+    ImGui.popItemWidth();
+    return result;
+  }
+
+  // Eklem eşlemesi: standart ad (Mixamo düzeni) → iskeletteki ad. Bilinen iskeletler (Mixamo, Rigify) kendiliğinden
+  // tanınır; burada yalnızca tanınmayan ya da yanlış eşlenen eklem verilir.
+  function drawJoints() {
+    ImGui.text("Eklem eşlemesi");
+    if (joints.length > 0) {
+      var missing = [for (standard in scene.JointNames.STANDARD) if (!resolvedJoints.exists(standard)) standard];
+      ImGui.textDisabled('Son içe aktarmada ${scene.JointNames.STANDARD.length - missing.length}/${scene.JointNames.STANDARD.length} standart eklem bulundu.');
+      if (missing.length > 0) ImGui.textWrapped("Eksik: " + missing.join(", "));
+    } else ImGui.textDisabled("Model alındıktan sonra bulunan eklemler burada görünür.");
+    var rows = [for (standard in scene.JointNames.STANDARD) if (settings.joints.exists(standard)) standard];
+    var gone : Null<String> = null;
+    for (standard in rows) {
+      ImGui.pushID('eklem_$standard');
+      ImGui.text(standard);
+      ImGui.sameLine();
+      ImGui.pushItemWidth(200 * editor.interfaceScale);
+      var actual = settings.joints.get(standard);
+      if (joints.length > 0) {
+        if (ImGui.beginCombo("##gercek", actual == "" ? "(eklem seç)" : actual)) {
+          for (joint in joints) if (ImGui.selectable(joint, joint == actual)) settings.joints.set(standard, joint);
+          ImGui.endCombo();
+        }
+      } else if (ImGui.inputText("##gercek", actual)) settings.joints.set(standard, actual);
+      ImGui.popItemWidth();
+      ImGui.sameLine();
+      if (ImGui.smallButton("Sil")) gone = standard;
+      ImGui.popID();
+    }
+    if (gone != null) settings.joints.remove(gone);
+    var free = [for (standard in scene.JointNames.STANDARD) if (!settings.joints.exists(standard)) standard];
+    if (free.length > 0) {
+      ImGui.pushItemWidth(200 * editor.interfaceScale);
+      if (ImGui.beginCombo("##yeni_eklem", "+ Eşleme")) {
+        for (standard in free) if (ImGui.selectable(standard, false)) settings.joints.set(standard, resolvedJoints.exists(standard) ? resolvedJoints.get(standard) : "");
+        ImGui.endCombo();
+      }
+      ImGui.popItemWidth();
+    }
   }
 
   // Takma noktaları: silah ve eşyanın takıldığı eklem, konum (metre) ve dönüş (derece). Karakterde
@@ -303,6 +440,17 @@ class AssetBrowser {
       var hmd = new hxd.fmt.hmd.Reader(new haxe.io.BytesInput(sys.io.File.getBytes(target))).readHeader();
       [for (model in hmd.models) if (model.skin != null) for (joint in model.skin.joints) if (!StringTools.endsWith(joint.name, "_end")) joint.name];
     } catch (e : Dynamic) [];
+  }
+
+  // İçe aktarmanın çözdüğü eklem eşlemesi (<hedef>.model.json, joints). Eşleme gelmeden alınmış modelde bilgi
+  // dosyasında yoktur: modelin eklem adlarından, içe aktarmanın yapacağı gibi çözülür.
+  function importedJointMap(source : String) : Map<String, String> {
+    var info = scene.editor.AssetImporter.infoPath(editor.importer.targetOf(source));
+    var map = try {
+      var raw : Dynamic = sys.FileSystem.exists(info) ? haxe.Json.parse(sys.io.File.getContent(info)) : null;
+      raw == null ? null : scene.JointNames.fromData(raw.joints);
+    } catch (e : Dynamic) null;
+    return map != null ? map : joints.length == 0 ? new Map() : scene.JointNames.resolve(joints, settings.joints);
   }
 
   // İçe aktarmanın yazdığı varsayılan noktalar (<hedef>.model.json): düzenlemeye bunlardan başlanır.

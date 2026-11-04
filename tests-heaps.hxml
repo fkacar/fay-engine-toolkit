@@ -1,0 +1,7 @@
+# Heaps'in matematik türlerini isteyen testler (tests/heaps). Oyunun kökünden çalışır.
+--interp
+-lib heaps
+-cp libs/scene-toolkit/runtime
+-cp libs/scene-toolkit/editor
+-cp libs/scene-toolkit/tests/heaps
+-main HeapsTests

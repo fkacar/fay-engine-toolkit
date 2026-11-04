@@ -11,6 +11,7 @@ set HL_NAME=hashlink-1.16.0-win
 set HL_URL=https://github.com/HaxeFoundation/hashlink/releases/download/1.16/%HL_NAME%.zip
 set HXML=build.hxml
 set BYTECODE=bin\game.hl
+set TESTS=
 if /i "%~1"=="editor" (
   set HXML=editor.hxml
   set BYTECODE=bin\editor.hl
@@ -19,6 +20,7 @@ if /i "%~1"=="editor" (
 if /i "%~1"=="test" (
   set HXML=libs\scene-toolkit\tests-hl.hxml
   set BYTECODE=bin\tests.hl
+  set TESTS=1
   shift
 )
 set HL_SHA256=EC80B5BFBE93AE497FF43CD72D5BB4D906DE3C6398839BA692FA28C47B54AA0F
@@ -61,6 +63,9 @@ if errorlevel 1 goto fail
 
 if /i "%~1"=="build" exit /b 0
 "%HL_DIR%\hl.exe" %BYTECODE%
+if errorlevel 1 exit /b %errorlevel%
+rem Testlerde ardindan Heaps'in matematik turlerini isteyen testler (yorumlayicida, tests\heaps).
+if defined TESTS call haxe libs\scene-toolkit\tests-heaps.hxml
 exit /b %errorlevel%
 
 :fail

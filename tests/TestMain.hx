@@ -1,4 +1,5 @@
 import h3d.scene.Object;
+import scene.editor.ImportSettings;
 import scene.Component;
 import scene.ComponentRegistry;
 import scene.FieldInfo.FieldHint;
@@ -2143,6 +2144,96 @@ class TestMain {
     check(!NavBaker.bake(0, world, terrain, []).isBlocked(15, 10), "eğim sınırı kalkınca tepeye çıkılır");
   }
 
+  // Eklem adları: Rigify (DEF- önce, ORG- sonra), mixamorig öneki, düz Mixamo; elle eşleme önce gelir.
+  static function testJointNames() {
+    var rigify = scene.JointNames.resolve(["DEF-hips", "DEF-spine.001", "DEF-hand.R", "ORG-hand.R", "DEF-hand.L", "ORG-foot.R", "DEF-thigh.L"]);
+    equals(rigify.get("Hips"), "DEF-hips", "Rigify kalça");
+    equals(rigify.get("Spine"), "DEF-spine.001", "Rigify omurga");
+    equals(rigify.get("RightHand"), "DEF-hand.R", "DEF, ORG'dan önce");
+    equals(rigify.get("RightFoot"), "ORG-foot.R", "DEF yoksa ORG");
+    equals(rigify.get("LeftUpLeg"), "DEF-thigh.L", "sol uyluk");
+    check(!rigify.exists("Head"), "iskelette olmayan eklem eşlenmez");
+    equals(scene.JointNames.resolve(["mixamorig:Hips"]).get("Hips"), "mixamorig:Hips", "mixamorig öneki");
+    equals(scene.JointNames.resolve(["Hips", "mixamorig:Hips"]).get("Hips"), "Hips", "düz ad önce");
+    var overrides = ["Hips" => "pelvis", "Head" => "yok_boyle"];
+    var mapped = scene.JointNames.resolve(["pelvis", "Hips", "DEF-head"], overrides);
+    equals(mapped.get("Hips"), "pelvis", "elle eşleme önce");
+    equals(mapped.get("Head"), "DEF-head", "elle verilen ad iskelette yoksa bilinen adlar denenir");
+    equals(scene.JointNames.actual(null, "Hips"), "Hips", "eşleme yoksa standart ad");
+    equals(scene.JointNames.actual(rigify, "Head"), "Head", "eşlemede yoksa standart ad");
+    var back = scene.JointNames.fromData(haxe.Json.parse(haxe.Json.stringify(scene.JointNames.toData(rigify))));
+    equals([for (k => v in back) '$k=$v'].length, [for (k in rigify.keys()) k].length, "eşleme JSON'dan geri okunur");
+    equals(back.get("RightFoot"), "ORG-foot.R", "geri okunan ad");
+    equals(scene.JointNames.fromData(null), null, "eşlemesiz bilgi dosyası");
+  }
+
+  // İçe aktarma ayarları: klip, boy ve kutu kuralları; klasör ayarı birleştirme; eski dosyanın kararlı yazılması.
+  static function testImportSettings() {
+    function fails(run : () -> Void, label : String, ?pos : haxe.PosInfos) check(try { run(); false; } catch (e : Dynamic) true, label, pos);
+    var own = ImportSettings.checkClip({name: "durma", source: "", take: "Idle_Loop"});
+    equals(own.take, "Idle_Loop", "kendi dosyasından klip");
+    fails(() -> ImportSettings.checkClip({name: "durma", source: ""}), "kaynaksız klibin take'i olmalı");
+    fails(() -> ImportSettings.checkClip({name: "durma", source: "a.glb", take: "x"}), "klip kaynağı FBX olmalı");
+    fails(() -> ImportSettings.checkClip({name: "Durma", source: "a.fbx"}), "klip adı küçük harf");
+    fails(() -> ImportSettings.checkClip({name: "durma", source: "a.fbx", arms: "b.obj"}), "kollar FBX olmalı");
+    equals(ImportSettings.checkClip({name: "durma", source: "a\\b.fbx", take: ""}).take, null, "boş take yok sayılır");
+    equals(ImportSettings.checkClip({name: "durma", source: "a\\b.fbx"}).source, "a/b.fbx", "ters bölü düzelir");
+    equals(ImportSettings.checkLength(0.75), 0.75, "boy");
+    fails(() -> ImportSettings.checkLength(0), "sıfır boy");
+    fails(() -> ImportSettings.checkLength(101), "çok büyük boy");
+    fails(() -> ImportSettings.checkLength("bir"), "sayı olmayan boy");
+    fails(() -> ImportSettings.checkBox({min: [1., 0., 0.], max: [0., 0., 0.]}), "kutuda min, max'tan büyük olamaz");
+
+    // Geçici klasör: yalnızca bu testin yazdığı dosyalar silinir.
+    var base = Sys.getEnv("TMPDIR");
+    var root = (base == null ? "/tmp" : base) + "/aktarim_testi_" + Std.random(1000000000);
+    var pack = '$root/assets/models/paket', folder = '$pack/${ImportSettings.FOLDER_FILE}';
+    sys.FileSystem.createDirectory('$pack/sovalye');
+    var source = '$pack/sovalye/sovalye.fbx';
+    var shared = new ImportSettings();
+    shared.clips = [{name: "durma", source: "", take: "Idle_Loop"}, {name: "yurume", source: "", take: "Walk_Loop"}];
+    shared.sockets = [{name: "sag_el", joint: "DEF-hand.R", offset: [0., 0., 0.], rotation: [0., 0., 0.]}];
+    shared.joints.set("Hips", "pelvis");
+    shared.length = 0.9;
+    shared.grip = true;
+    shared.trim = [{min: [0., 0., 0.], max: [1., 1., 1.]}];
+    shared.write(source, folder);
+    equals(ImportSettings.folderFiles(source).join(","), folder, "klasör ayarı bulunur");
+    var inherited = ImportSettings.effective(source);
+    equals(inherited.clips.length, 2, "klasörün klipleri");
+    equals(inherited.joints.get("Hips"), "pelvis", "klasörün eklem eşlemesi");
+    equals(inherited.trim.length, 0, "kırpma klasörden gelmez");
+    equals(inherited.inherited.length, 1, "etkin ayar klasör dosyasını bilir");
+    var mine = new ImportSettings();
+    mine.clips = [{name: "yurume", source: "", take: "Walk_Formal_Loop"}];
+    mine.length = 0.75;
+    mine.blender = true;
+    mine.trim = [{min: [0., 0., 0.], max: [0.1, 0.1, 0.1], note: "plaka"}];
+    mine.write(source);
+    var merged = ImportSettings.effective(source);
+    equals(merged.clips.length, 2, "aynı adlı klip ezilir, sayı artmaz");
+    equals(Lambda.find(merged.clips, c -> c.name == "yurume").take, "Walk_Formal_Loop", "modelin klibi klasörünkünü ezer");
+    equals(merged.length, 0.75, "modelin boyu");
+    equals(merged.grip, true, "klasörün tutamak ayarı kalır");
+    equals(merged.blender, true, "modelin blender ayarı");
+    equals(merged.sockets.length, 1, "klasörün takma noktası");
+    equals(merged.trim.length, 1, "kırpma modelin dosyasından");
+    equals(ImportSettings.read(source).joints.exists("Hips"), false, "modelin kendi dosyası klasörünkünü içermez");
+
+    // Yeni alanları kullanmayan dosya yeniden yazılınca aynı kalır.
+    var plain = '$pack/sovalye/eski.fbx';
+    var old = new ImportSettings();
+    old.clips = [{name: "durma", source: "x.fbx"}];
+    old.write(plain);
+    var text = sys.io.File.getContent(ImportSettings.path(plain));
+    check(text.indexOf('"joints"') < 0 && text.indexOf('"length"') < 0 && text.indexOf('"grip"') < 0 && text.indexOf('"blender"') < 0, "eski dosyaya yeni alan yazılmaz");
+    ImportSettings.read(plain).write(plain);
+    equals(sys.io.File.getContent(ImportSettings.path(plain)), text, "eski dosya kararlı");
+
+    for (file in [folder, ImportSettings.path(source), ImportSettings.path(plain)]) sys.FileSystem.deleteFile(file);
+    for (dir in ['$pack/sovalye', pack, '$root/assets/models', '$root/assets', root]) sys.FileSystem.deleteDirectory(dir);
+  }
+
   // Dosya yolu sütunu ve tablo değişince oyun verisinin yeniden okunması. Takma noktaları (ImportSettings)
   // Heaps ister, editör düzeneğinde import_model ile sınanır.
   static function testSockets() {
@@ -2491,6 +2582,8 @@ class TestMain {
     testStreaming();
     testEntityLookup();
     testForgetCommands();
+    testJointNames();
+    testImportSettings();
     testBrushes();
     testBrushLockedEdges();
     testScatterBrush();

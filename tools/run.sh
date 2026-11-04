@@ -11,6 +11,7 @@ HL_DIR=$TOOLKIT/vendor/hashlink/mac-arm64
 HXML=build-mac.hxml
 C_DIR=bin/c
 OUTPUT=bin/game
+TESTS=
 
 if [ "$1" = "editor" ]; then
   HXML=editor-mac.hxml
@@ -25,6 +26,7 @@ elif [ "$1" = "test" ]; then
   HXML=$TOOLKIT/tests-mac.hxml
   C_DIR=bin/tests-c
   OUTPUT=bin/tests
+  TESTS=1
   shift
 fi
 
@@ -65,5 +67,10 @@ clang -std=c11 -O0 -g -w -I "$C_DIR" -I "$HL_DIR/include" -o "$OUTPUT" "$C_DIR/m
   "$HL_DIR/libhl.dylib" "$HL_DIR"/*.hdll
 
 if [ "$1" != "build" ]; then
+  # Testlerde ardından Heaps'in matematik türlerini isteyen testler (yorumlayıcıda, tests/heaps).
+  if [ -n "$TESTS" ]; then
+    "$OUTPUT"
+    exec haxe "$TOOLKIT/tests-heaps.hxml"
+  fi
   exec "$OUTPUT"
 fi

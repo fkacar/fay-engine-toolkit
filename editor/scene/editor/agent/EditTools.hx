@@ -109,19 +109,25 @@ class EditTools {
         editor.releaseIds.map(args.from, args.to, old.name);
         ({mapped: args.from, to: args.to, revision: editor.commands.revision} : Dynamic);
       }, false, ["from"]);
-    tool("list_models", "Modeller. models: res altındaki yerleştirilebilir modeller; model bileşeninin path alanına bu yol yazılır. notImported: assets altında olup içe aktarılmamış veya kaynağı sonradan değişmiş FBX'ler, import_model ile alınır.", {}, _ -> listModels(), true);
+    tool("list_models", "Modeller. models: res altındaki yerleştirilebilir modeller; model bileşeninin path alanına bu yol yazılır. notImported: assets altında olup içe aktarılmamış veya kaynağı ya da ayarı (klasör ayarı dahil) sonradan değişmiş modeller (FBX, GLB, glTF, OBJ), import_model ile alınır.", {}, _ -> listModels(), true);
     server.add({name: "import_model", readOnly: false, run: importModel,
-      description: "assets altındaki bir FBX'i Asset Browser'daki Model içe aktar gibi dönüştürür, res/models altına yazar. Dosya işidir, geri alma adımı değildir; yeniden alınca sahnelerdeki yol değişmez. Büyük modelde editör bir süre tepki vermez. Dönen path'i model bileşenine yaz. "
+      description: "assets altındaki bir modeli (FBX; GLB, glTF ve OBJ Blender'la çevrilir) Asset Browser'daki Model içe aktar gibi dönüştürür, res/models altına yazar (assets/models/mock altındakiler res/models/mock altına). Dosya işidir, geri alma adımı değildir; yeniden alınca sahnelerdeki yol değişmez. Büyük modelde editör bir süre tepki vermez. Dönen path'i model bileşenine yaz. "
+        + "Ayarlar kaynağın yanındaki <ad>.aktarim.json'a yazılır; folder verilirse klasör ayarına (klasor.aktarim.json): o klasör ve alt klasörlerdeki bütün modeller onu kullanır, modelin kendi dosyasındaki aynı adlı klip ve nokta onu ezer. Aynı iskeletli bir paketin klipleri ve eklem eşlemesi böyle bir kez yazılır; klasördeki öbür modeller list_models'te notImported görünür, onları da al. "
         + "trim verilirse kaynağın yanındaki .aktarim.json'a yazılır ve kutuların içinde kalan üçgenler atılır (yapay zekâ modellerindeki yer plakası, havada kalan parça); [] kırpmayı kaldırır. Kutuları model_info'nun sınırlarına ve taban haritasına göre seç. "
         + "sockets takma noktalarıdır, aynı dosyaya yazılır; [] verilirse iskeletli modelde varsayılanlar (sag_el, sol_el, sirt, bel, bas) kullanılır. Sonucu preview_character ile gözle denetle.",
       schema: {type: "object", properties: {
         source: {type: "string", description: "assets yolu veya dosya adının bir parçası"},
         trim: {type: "array", description: "[{min: [x, y, z], max: [x, y, z], note?}], modelin kendi birimleriyle, Z yukarı", items: {type: "object"}},
-        clips: {type: "array", description: "[{name, source, arms?}]: aynı iskeletle üretilmiş başka FBX'lerin klipleri bu modele eklenir. Karakter durma, yurume, kosma, hizli_kosma adlarını kullanır; silah türünün seti _tur ekiyle (durma_tufek). arms verilirse kollar (köprücükten ele) o FBX'in klibinin ilk karesinde sabit kalır, gövde ve bacaklar source'tan: kütüphanede olmayan silahlı klip böyle türetilir (silahsız durma + tüfekli koşunun kolları). [] klipleri kaldırır", items: {type: "object"}},
-        sockets: {type: "array", description: "[{name, joint, offset: [x, y, z], rotation: [x, y, z]}]: takma noktaları. Karakterde eksenler X ileri, Y sağ, Z yukarı (bağlama pozundaki gövdeye göre); offset metre, eklemin dinlenme pozundaki yerine göre; rotation derece. El noktasında X bilekten parmaklara, Z yumruğun deliği boyunca başparmağa. Silah modelinde joint boş, name tutamak: kabzanın avuçta duracağı yer, X namlu yönünde, Z yukarı", items: {type: "object"}},
+        clips: {type: "array", description: "[{name, source, take?, arms?}]: aynı iskeletle üretilmiş başka FBX'lerin klipleri bu modele eklenir. take: dosyada birden çok klip varsa hangisi (model_info takes listesindeki ad, Walk_Loop; \"Armature|Walk_Loop\" gibi adlar sonundan eşleşir). source boşsa klip modelin kendi dosyasından alınır, take zorunlu. Karakter durma, yurume, kosma, hizli_kosma adlarını kullanır; silah türünün seti _tur ekiyle (durma_tufek). arms verilirse kollar (köprücükten ele) o FBX'in klibinin ilk karesinde sabit kalır, gövde ve bacaklar source'tan: kütüphanede olmayan silahlı klip böyle türetilir (silahsız durma + tüfekli koşunun kolları). [] klipleri kaldırır", items: {type: "object"}},
+        sockets: {type: "array", description: "[{name, joint, offset: [x, y, z], rotation: [x, y, z]}]: takma noktaları. Karakterde eksenler X ileri, Y sağ, Z yukarı (bağlama pozundaki gövdeye göre); offset metre, eklemin dinlenme pozundaki yerine göre; rotation derece. El noktasında X bilekten parmaklara, Z yumruğun deliği boyunca başparmağa. Silah modelinde joint boş, name tutamak: kabzanın avuçta duracağı yer; tüfekte X namlu yönünde, Z yukarı; sapı olan silahta (balta, kılıç) Z saptan başa, X başın ya da ağzın yönü", items: {type: "object"}},
+        joints: {type: "object", description: "Eklem eşlemesi {standart ad: iskeletteki ad}, ör. {\"Hips\": \"pelvis\"}. Mixamo ve Rigify (DEF-hips, DEF-hand.R) adları kendiliğinden tanınır; yalnızca tanınmayan ya da yanlış eşlenen eklemi ver. Standart adlar: Hips, Spine, Spine1, Spine2, Neck, Head, Left/Right + Shoulder, Arm, ForeArm, Hand, UpLeg, Leg, Foot, ToeBase. {} kaldırır. Çözülen eşleme model_info standardJoints"},
+        length: {type: "number", description: "İskeletsiz modelin (silah, eşya) en uzun kenarı, metre; model bu boya ölçeklenir (silah paketleri 1 birime sığdırılmış gelir). 0 kaldırır"},
+        grip: {type: ["boolean", "string"], description: "true: iskeletsiz modele tutamak noktası şekilden tahmin edilir (ince uç sap; elle verilen tutamak önce gelir). \"klasorden\" kaldırır"},
+        blender: {type: ["boolean", "string"], description: "true: FBX önce Blender'la yeniden yazılır (başka aracın ölçeğiyle gelen dosya, kemikler 100 kat büyükse). GLB/glTF/OBJ her zaman çevrilir. \"klasorden\" kaldırır"},
+        folder: {type: ["boolean", "string"], description: "Ayarları modelin dosyası yerine klasör ayarına yaz: true kaynağa en yakın klasor.aktarim.json (yoksa kaynağın klasörü), metin ise assets altında kaynağın üst klasörlerinden biri. trim klasöre yazılmaz"},
       }, required: ["source"]}});
     server.add({name: "model_info", readOnly: true, run: modelInfo,
-      description: "assets altındaki bir FBX'i dönüştürmeden inceler: sınırlar (modelin birimleriyle, Z yukarı), üçgen sayısı, iskelet eklemleri, klipler, takma noktaları (sockets: ayardakiler, character.sockets: oyunun kullanacakları, varsayılanlar dahil), kırpma ayarı ve taban haritası. Taban haritası alt %3'teki üçgenlerin yukarıdan sayısıdır: ayaklar iki küme olur, başka küme genellikle fazlalıktır. Büyük modelde editör bir süre tepki vermez.",
+      description: "assets altındaki bir modeli dönüştürmeden inceler (GLB Blender'la çevrilir): sınırlar (modelin birimleriyle, Z yukarı, length uygulanmadan), üçgen sayısı, iskelet eklemleri, standardJoints (çözülen eklem eşlemesi), takes (dosyadaki klip adları, clips'in take alanı için), klipler, takma noktaları (sockets: ayardakiler, character.sockets: oyunun kullanacakları, varsayılanlar dahil), etkin ayar (klasör ayarlarıyla birleşik; inherited: klasör dosyaları; length, grip, blender, jointOverrides), kırpma ayarı ve taban haritası. Taban haritası alt %3'teki üçgenlerin yukarıdan sayısıdır: ayaklar iki küme olur, başka küme genellikle fazlalıktır. Büyük modelde editör bir süre tepki vermez.",
       schema: {type: "object", properties: {
         source: {type: "string", description: "assets yolu veya dosya adının bir parçası"},
         floorFraction: {type: "number", description: "Taban haritasının yüksekliği, modelin boyuna oranla (varsayılan 0.03)"},
@@ -592,8 +598,10 @@ class EditTools {
   // Asset Browser gibi: dönüştürme birkaç kare sonra başlar, tasarımcı durum satırında ne olduğunu görür.
   function importModel(args : Dynamic) : AgentReply {
     var source = modelSource(args.source);
-    if (args.trim != null || args.clips != null || args.sockets != null) {
-      var settings = ImportSettings.read(source);
+    var file = settingsFile(source, args.folder);
+    if (args.trim != null || args.clips != null || args.sockets != null || args.joints != null || args.length != null || args.grip != null || args.blender != null) {
+      if (file != null && args.trim != null) throw "trim klasör ayarına yazılmaz, yalnızca modelin kendi dosyasına (folder olmadan)";
+      var settings = file == null ? ImportSettings.read(source) : ImportSettings.readFile(file);
       if (args.trim != null) {
         var boxes : Array<Dynamic> = args.trim;
         settings.trim = [for (box in boxes) ModelTrim.check(box)];
@@ -602,7 +610,8 @@ class EditTools {
         var clips : Array<Dynamic> = args.clips;
         settings.clips = [for (clip in clips) {
           var spec = ImportSettings.checkClip(clip);
-          spec.source = modelSource(spec.source);
+          if (spec.source != "") spec.source = modelSource(spec.source);
+          if (spec.arms != null) spec.arms = modelSource(spec.arms);
           spec;
         }];
       }
@@ -610,7 +619,20 @@ class EditTools {
         var sockets : Array<Dynamic> = args.sockets;
         settings.sockets = [for (socket in sockets) ImportSettings.checkSocket(socket)];
       }
-      settings.write(source);
+      if (args.joints != null) {
+        var map = new Map<String, String>();
+        for (field in Reflect.fields(args.joints)) {
+          if (scene.JointNames.STANDARD.indexOf(field) < 0) throw 'standart eklem adı değil: $field (${scene.JointNames.STANDARD.join(", ")})';
+          var actual : Dynamic = Reflect.field(args.joints, field);
+          if (!Std.isOfType(actual, String) || actual == "") throw 'eklem eşlemesi ad olmalı: $field';
+          map.set(field, actual);
+        }
+        settings.joints = map;
+      }
+      if (args.length != null) settings.length = args.length == 0 ? null : ImportSettings.checkLength(args.length);
+      settings.grip = flag(args.grip, settings.grip, "grip");
+      settings.blender = flag(args.blender, settings.blender, "blender");
+      settings.write(source, file);
     }
     editor.show('Ajan modeli dönüştürüyor: $source. Büyük modellerde editör bir süre tepki vermez');
     var frames = IMPORT_WAIT_FRAMES;
@@ -629,6 +651,26 @@ class EditTools {
       var sockets : Dynamic = FileSystem.exists(info) ? haxe.Json.parse(sys.io.File.getContent(info)).sockets : null;
       return {value: {source: source, path: result.target.substr(RESOURCE_DIRECTORY.length + 1), triangles: result.triangles, parts: result.parts, trimmed: result.trimmed, clips: result.clips, sockets: sockets == null ? [] : sockets, problems: result.problems}};
     }};
+  }
+
+  // true / false ayarlar, "klasorden" kaldırır (klasör ayarı ya da hayır), verilmezse olduğu gibi.
+  static function flag(value : Dynamic, current : Null<Bool>, name : String) : Null<Bool> {
+    if (value == null) return current;
+    if (value == true || value == false) return value;
+    if (value == "klasorden") return null;
+    throw '$name true, false veya "klasorden" olmalı: $value';
+  }
+
+  // folder: true en yakın klasör ayarı (yoksa kaynağın klasörü), metin kaynağın üst klasörlerinden biri; yoksa null.
+  function settingsFile(source : String, folder : Dynamic) : Null<String> {
+    if (folder == null || folder == false) return null;
+    if (folder == true) {
+      var found = ImportSettings.folderFiles(source);
+      return found.length > 0 ? found[found.length - 1] : '${Path.directory(source)}/${ImportSettings.FOLDER_FILE}';
+    }
+    var directory = Path.removeTrailingSlashes(StringTools.replace(Std.string(folder), "\\", "/"));
+    if (!StringTools.startsWith(source, directory + "/") || !StringTools.startsWith(directory, "assets")) throw 'folder kaynağın assets altındaki üst klasörlerinden biri olmalı: $directory';
+    return '$directory/${ImportSettings.FOLDER_FILE}';
   }
 
   function modelInfo(args : Dynamic) : AgentReply {
@@ -650,8 +692,8 @@ class EditTools {
     for (source in sources) if (source.toLowerCase() == needle) return source;
     var found = sources.filter(source -> source.toLowerCase().indexOf(needle) >= 0);
     if (found.length == 1) return found[0];
-    if (found.length == 0) throw 'assets altında böyle bir FBX yok: $wanted. FBX\'ler: ${sources.length == 0 ? "yok" : sources.join(", ")}';
-    throw '"$wanted" birden çok FBX ile eşleşiyor: ${found.join(", ")}';
+    if (found.length == 0) throw 'assets altında böyle bir model yok: $wanted. Modeller: ${sources.length == 0 ? "yok" : sources.join(", ")}';
+    throw '"$wanted" birden çok modelle eşleşiyor: ${found.join(", ")}';
   }
 
   function checkRevision(expected : Null<Int>) {

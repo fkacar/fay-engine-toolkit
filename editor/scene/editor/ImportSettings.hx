@@ -1,31 +1,48 @@
 package scene.editor;
 
 import haxe.io.Path;
-import scene.editor.ModelTrim.TrimBox;
 import sys.FileSystem;
 import sys.io.File;
 
 // arms: kollar (köprücükten ele) bu FBX'in klibinin ilk karesinde sabit durur, gövde ve bacaklar source'tan.
 // Kütüphanede olmayan silahlı klipler böyle türetilir: silahsız durma + tüfekli koşunun kol duruşu.
-typedef ClipSpec = {name : String, source : String, ?arms : String};
+// take: kaynaktaki klibin adı (çok klipli dosya); "Armature|Walk_Loop" gibi adlar sonundan da eşleşir. Yoksa ilk klip.
+// source boşsa klip modelin kendi dosyasından alınır (take ile).
+typedef ClipSpec = {name : String, source : String, ?take : String, ?arms : String};
+
+// Kırpma kutusu (ModelTrim): içinde kalan üçgenler atılır; modelin birimleriyle, Z yukarı.
+typedef TrimBox = {min : Array<Float>, max : Array<Float>, ?note : String};
 
 // Takma noktası: silah, kalkan, çanta gibi ayrı modellerin takıldığı yer. Bir eklemde (iskeletsiz
 // modelde joint boş: modelin kendisi) konum ve dönüş. Eksenler karakterde X ileri, Y sağ, Z yukarı (bağlama pozunda);
 // konum metre ve eklemin dinlenme pozundaki yerine göre, dönüş derece (X, Y, Z eksenleri etrafında).
 typedef SocketSpec = {name : String, joint : String, offset : Array<Float>, rotation : Array<Float>};
 
-// Bir FBX'in içe aktarma ayarları, kaynağın yanındaki <ad>.aktarim.json dosyasında:
-// trim: kırpma kutuları, clips: başka FBX'lerden alınıp bu modele eklenen klipler,
-// sockets: takma noktaları (boşsa iskeletli modelde varsayılanlar kullanılır).
+// Bir modelin (FBX ya da GLB) içe aktarma ayarları, kaynağın yanındaki <ad>.aktarim.json dosyasında:
+// trim: kırpma kutuları, clips: bu modele eklenen klipler (başka dosyadan ya da kendi dosyasının adlı klibi),
+// sockets: takma noktaları (boşsa iskeletli modelde varsayılanlar), joints: standart eklem adı → iskeletteki ad
+// (tanınmayan iskelet için; bkz. scene.JointNames), length: modelin en uzun kenarı metre (iskeletsiz modeller;
+// silah paketleri 1 birime sığdırılmış gelir), grip: true ise iskeletsiz modele "tutamak" tahmin edilir (elle verilmemişse),
+// blender: true ise FBX önce Blender'dan geçer (başka aracın ölçeğiyle yazılmış dosya; bkz. BlenderConverter).
+// Klasör ayarı (klasor.aktarim.json): klasördeki ve alt klasörlerdeki bütün modeller için ortak klipler, takma
+// noktaları ve eklem adları; modelin kendi dosyası aynı adlı olanı ezer. Aynı iskeletli bir paket tek dosyayla alınır.
 // Dosya elle de yazılabilir; editör ve ajan aynı biçimi okur, aynı sırayla yazar.
 class ImportSettings {
   public static inline var SUFFIX = ".aktarim.json";
+  public static inline var FOLDER_FILE = "klasor.aktarim.json";
+  static inline var SOURCE_ROOT = "assets";
   static var CLIP_NAME = ~/^[a-z0-9_]+$/;
   static inline var MAX_OFFSET = 5.;
 
   public var trim : Array<TrimBox> = [];
   public var clips : Array<ClipSpec> = [];
   public var sockets : Array<SocketSpec> = [];
+  public var joints = new Map<String, String>();
+  public var length : Null<Float> = null;
+  public var grip : Null<Bool> = null;
+  public var blender : Null<Bool> = null;
+  // Etkin ayarı oluşturan klasör dosyaları (en uzaktan en yakına); bilgi için.
+  public var inherited : Array<String> = [];
 
   public function new() {}
 
@@ -34,26 +51,94 @@ class ImportSettings {
   }
 
   public static function read(source : String) : ImportSettings {
+    return readFile(path(source));
+  }
+
+  // Modelin kendi ayarı ile üstündeki klasör ayarları birleşik: içe aktarma bunu kullanır. Kırpma yalnızca modelin.
+  public static function effective(source : String) : ImportSettings {
+    var merged = new ImportSettings();
+    for (file in folderFiles(source)) {
+      mergeInto(merged, readFile(file));
+      merged.inherited.push(file);
+    }
+    var own = read(source);
+    mergeInto(merged, own);
+    merged.trim = own.trim;
+    return merged;
+  }
+
+  // Kaynağın üstündeki klasör ayarları, assets'e kadar; en uzaktan en yakına.
+  public static function folderFiles(source : String) : Array<String> {
+    var found = [];
+    var directory = Path.directory(StringTools.replace(source, "\\", "/"));
+    while (directory != "" && directory != ".") {
+      var file = '$directory/$FOLDER_FILE';
+      if (FileSystem.exists(file)) found.unshift(file);
+      if (Path.withoutDirectory(directory) == SOURCE_ROOT) break;
+      directory = Path.directory(directory);
+    }
+    return found;
+  }
+
+  static function mergeInto(into : ImportSettings, from : ImportSettings) {
+    for (clip in from.clips) {
+      into.clips = into.clips.filter(other -> other.name != clip.name);
+      into.clips.push(clip);
+    }
+    for (socket in from.sockets) {
+      into.sockets = into.sockets.filter(other -> other.name != socket.name);
+      into.sockets.push(socket);
+    }
+    for (standard => actual in from.joints) into.joints.set(standard, actual);
+    if (from.length != null) into.length = from.length;
+    if (from.grip != null) into.grip = from.grip;
+    if (from.blender != null) into.blender = from.blender;
+  }
+
+  public static function readFile(file : String) : ImportSettings {
     var settings = new ImportSettings();
-    var file = path(source);
     if (!FileSystem.exists(file)) return settings;
     var raw : Dynamic = haxe.Json.parse(File.getContent(file));
     var boxes : Array<Dynamic> = raw.trim == null ? [] : raw.trim;
-    settings.trim = [for (box in boxes) ModelTrim.check(box)];
+    settings.trim = [for (box in boxes) checkBox(box)];
     var clips : Array<Dynamic> = raw.clips == null ? [] : raw.clips;
     settings.clips = [for (clip in clips) checkClip(clip)];
     var sockets : Array<Dynamic> = raw.sockets == null ? [] : raw.sockets;
     settings.sockets = [for (socket in sockets) checkSocket(socket)];
+    if (raw.joints != null) for (field in Reflect.fields(raw.joints)) {
+      var value : Dynamic = Reflect.field(raw.joints, field);
+      if (!Std.isOfType(value, String) || value == "") throw 'eklem eşlemesi ad olmalı: $field';
+      settings.joints.set(field, value);
+    }
+    if (raw.length != null) settings.length = checkLength(raw.length);
+    if (raw.grip == true || raw.grip == false) settings.grip = raw.grip;
+    if (raw.blender == true || raw.blender == false) settings.blender = raw.blender;
     return settings;
   }
 
+  public static function checkBox(box : Dynamic) : TrimBox {
+    var min : Array<Float> = box.min, max : Array<Float> = box.max;
+    if (min == null || max == null || min.length != 3 || max.length != 3) throw "kırpma kutusu {min: [x, y, z], max: [x, y, z]} olmalı";
+    for (i in 0...3) if (!Std.isOfType(min[i], Float) || !Std.isOfType(max[i], Float) || min[i] > max[i]) throw 'kırpma kutusunda min, max\'tan büyük ya da sayı değil: ${haxe.Json.stringify(box)}';
+    return {min: min, max: max, note: box.note};
+  }
+
+  public static function checkLength(value : Dynamic) : Float {
+    var number : Float = Std.isOfType(value, Float) || Std.isOfType(value, Int) ? value : Math.NaN;
+    if (!Math.isFinite(number) || number <= 0 || number > 100) throw 'length 0 ile 100 metre arasında olmalı: $value';
+    return number;
+  }
+
   public static function checkClip(clip : Dynamic) : ClipSpec {
-    var name : String = clip.name, source : String = clip.source;
+    var name : String = clip.name, source : String = clip.source == null ? "" : clip.source;
+    var take : Null<String> = clip.take == null || clip.take == "" ? null : clip.take;
     if (name == null || !CLIP_NAME.match(name)) throw 'klip adı küçük harf, rakam ve _ olmalı: ${haxe.Json.stringify(clip)}';
-    if (source == null || Path.extension(source).toLowerCase() != "fbx") throw 'klibin kaynağı bir FBX olmalı: ${haxe.Json.stringify(clip)}';
+    if (source == "" && take == null) throw 'klibin kaynağı ya da modelin kendi dosyasındaki adı (take) olmalı: ${haxe.Json.stringify(clip)}';
+    if (source != "" && Path.extension(source).toLowerCase() != "fbx") throw 'klibin kaynağı bir FBX olmalı: ${haxe.Json.stringify(clip)}';
     var arms : Null<String> = clip.arms == null || clip.arms == "" ? null : clip.arms;
     if (arms != null && Path.extension(arms).toLowerCase() != "fbx") throw 'klibin kolları bir FBX olmalı: ${haxe.Json.stringify(clip)}';
     var spec : ClipSpec = {name: name, source: StringTools.replace(source, "\\", "/")};
+    if (take != null) spec.take = take;
     if (arms != null) spec.arms = StringTools.replace(arms, "\\", "/");
     return spec;
   }
@@ -76,7 +161,8 @@ class ImportSettings {
     return {name: name, joint: joint == null ? "" : joint, offset: vector(socket.offset, "konumu", MAX_OFFSET), rotation: vector(socket.rotation, "dönüşü", 360)};
   }
 
-  public function write(source : String) {
+  // file verilirse oraya yazar (klasör ayarı: <klasör>/klasor.aktarim.json).
+  public function write(source : String, ?file : String) {
     var names = new Map<String, Bool>();
     for (clip in clips) {
       if (names.exists(clip.name)) throw 'aynı adda iki klip: ${clip.name}';
@@ -87,6 +173,7 @@ class ImportSettings {
       '    ' + text + (box.note == null || box.note == "" ? "" : ', "note": ${haxe.Json.stringify(box.note)}') + "}";
     }];
     var lines = [for (clip in clips) '    {"name": ${haxe.Json.stringify(clip.name)}, "source": ${haxe.Json.stringify(clip.source)}'
+      + (clip.take == null || clip.take == "" ? "" : ', "take": ${haxe.Json.stringify(clip.take)}')
       + (clip.arms == null || clip.arms == "" ? "" : ', "arms": ${haxe.Json.stringify(clip.arms)}') + '}'];
     var socketNames = new Map<String, Bool>();
     for (socket in sockets) {
@@ -98,6 +185,13 @@ class ImportSettings {
       '    {"name": ${haxe.Json.stringify(spec.name)}, "joint": ${haxe.Json.stringify(spec.joint)}, "offset": ${haxe.Json.stringify(spec.offset)}, "rotation": ${haxe.Json.stringify(spec.rotation)}}';
     }];
     function list(items : Array<String>) return items.length == 0 ? "[]" : "[\n" + items.join(",\n") + "\n  ]";
-    File.saveContent(path(source), '{\n  "trim": ${list(boxes)},\n  "clips": ${list(lines)},\n  "sockets": ${list(points)}\n}\n');
+    // Yeni alanlar yalnızca kullanılınca yazılır: eski dosyalar yeniden yazılınca aynı kalır.
+    var extra = "";
+    var mapped = [for (standard in scene.JointNames.STANDARD) if (joints.exists(standard)) '    ${haxe.Json.stringify(standard)}: ${haxe.Json.stringify(joints.get(standard))}'];
+    if (mapped.length > 0) extra += ',\n  "joints": {\n' + mapped.join(",\n") + "\n  }";
+    if (length != null) extra += ',\n  "length": ${checkLength(length)}';
+    if (grip != null) extra += ',\n  "grip": $grip';
+    if (blender != null) extra += ',\n  "blender": $blender';
+    File.saveContent(file == null ? path(source) : file, '{\n  "trim": ${list(boxes)},\n  "clips": ${list(lines)},\n  "sockets": ${list(points)}$extra\n}\n');
   }
 }

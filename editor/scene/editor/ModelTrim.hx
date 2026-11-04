@@ -2,7 +2,7 @@ package scene.editor;
 
 import hxd.fmt.hmd.Data;
 
-typedef TrimBox = {min : Array<Float>, max : Array<Float>, ?note : String};
+import scene.editor.ImportSettings.TrimBox;
 
 // Yapay zekâ modellerindeki fazlalık için içe aktarma ayarı: kutuların içinde kalan üçgenler atılır
 // (kuyruğun altındaki yer plakası, havada kalan parça). Ayar kaynağın yanında <ad>.aktarim.json
@@ -29,10 +29,7 @@ class ModelTrim {
   }
 
   public static function check(box : Dynamic) : TrimBox {
-    var min : Array<Float> = box.min, max : Array<Float> = box.max;
-    if (min == null || max == null || min.length != 3 || max.length != 3) throw "kırpma kutusu {min: [x, y, z], max: [x, y, z]} olmalı";
-    for (i in 0...3) if (!Std.isOfType(min[i], Float) || !Std.isOfType(max[i], Float) || min[i] > max[i]) throw 'kırpma kutusunda min, max\'tan büyük ya da sayı değil: ${haxe.Json.stringify(box)}';
-    return {min: min, max: max, note: box.note};
+    return ImportSettings.checkBox(box);
   }
 
   // Üçgen silinmez, üç köşesi aynı noktaya alınır: çizilmez, köşe ve deri verisi bozulmaz.

@@ -16,12 +16,17 @@ typedef ClipSource = {spec : ClipSpec, hmd : Data, animation : Null<h3d.anim.Ani
 class ModelClips {
   // Ayak yere basıyor sayılır: en alçak noktasından boyun bu oranı kadar yukarıda değilse.
   static inline var PLANTED_FRACTION = 0.015;
+  // Koşu kliplerinde temas: ayağın dikey yolunun en alçak bu oranı (yedek ölçüm, bkz. stepOf).
+  static inline var CONTACT_FRACTION = 0.25;
+  // Katı eşiğin bulduğu örnek kare sayısının bu oranından azsa yedek ölçüme geçilir.
+  static inline var CONTACT_SAMPLES = 0.2;
   // Bu orandan çok eklemi modelde olmayan klip başka iskeletten gelmiştir.
   static inline var FOREIGN_FRACTION = 0.3;
 
-  public static function merge(hmd : Data, clips : Array<ClipSource>, problems : Array<String>) : Array<ClipInfo> {
+  // names: standart eklem adı → iskeletteki ad (scene.JointNames); yoksa standart adlar aranır.
+  public static function merge(hmd : Data, clips : Array<ClipSource>, problems : Array<String>, ?names : Map<String, String>) : Array<ClipInfo> {
     var skin = skinOf(hmd);
-    var names = skin == null ? new Map<String, Bool>() : [for (joint in skin.joints) joint.name => true];
+    var present = skin == null ? new Map<String, Bool>() : [for (joint in skin.joints) joint.name => true];
     var height = heightOf(hmd);
     var out = new haxe.io.BytesOutput();
     out.write(hmd.data);
@@ -37,13 +42,13 @@ class ModelClips {
       out.write(clip.hmd.data);
       for (k in 0...animations.length) {
         var animation = animations[k];
-        var missing = animation.objects.filter(object -> !names.exists(object.name)).length;
+        var missing = animation.objects.filter(object -> !present.exists(object.name)).length;
         if (skin != null && missing > animation.objects.length * FOREIGN_FRACTION)
           problems.push('${clip.spec.source}: ${animation.objects.length} eklemin $missing tanesi modelde yok, klip başka iskeletten olabilir');
         animation.dataPosition += base;
         animation.name = k == 0 ? clip.spec.name : '${clip.spec.name}_${k + 1}';
         hmd.animations.push(animation);
-        var step = k == 0 && clip.animation != null ? stepOf(hmd, clip.animation, height) : null;
+        var step = k == 0 && clip.animation != null ? stepOf(hmd, clip.animation, height, names) : null;
         infos.push({
           name: animation.name,
           frames: animation.frames,
@@ -61,20 +66,21 @@ class ModelClips {
 
   // Oyunun karakteri yerleştirmesi için: boy, birim, dinlenme pozunda kalçanın yeri, bakış yönü, klipler.
   // İskeletsiz modelde (silah, eşya) yalnızca takma noktaları yazılır, o da varsa.
-  public static function describe(hmd : Data, clips : Array<ClipInfo>, ?sockets : Array<SocketSpec>) : Null<Dynamic> {
+  public static function describe(hmd : Data, clips : Array<ClipInfo>, ?sockets : Array<SocketSpec>, ?names : Map<String, String>) : Null<Dynamic> {
     if (sockets == null) sockets = [];
     var skin = skinOf(hmd);
     if (skin == null) return sockets.length == 0 ? null : {sockets: sockets};
     var scale = modelScale(hmd);
     var rest = restPose(skin.joints);
-    var hips = indexOf(skin.joints, "Hips");
+    var hips = find(skin.joints, "Hips", names);
     if (hips < 0) hips = Lambda.findIndex(skin.joints, joint -> joint.parent < 0);
     var root = rest[hips];
-    var facing = forwardOf(clips, skin.joints, rest);
+    var facing = forwardOf(clips, skin.joints, rest, names);
     // Takma noktalarının ekseni: bağlama pozundaki gövdenin önü (ayak parmaklarının yönü). Kliplerin
     // yönü bundan farklı olabilir (dinlenme pozu ters dönük bir klip karesi olabilir); köşeler bağlama pozuna bağlı.
     var bind = bindPose(skin.joints);
-    var frame = forward(skin.joints, [for (i in 0...skin.joints.length) bind[i] != null ? bind[i] : rest[i]]);
+    var frame = forward(skin.joints, [for (i in 0...skin.joints.length) bind[i] != null ? bind[i] : rest[i]], names);
+    var resolved = names != null ? names : scene.JointNames.resolve([for (joint in skin.joints) joint.name]);
     return {
       // Metre: modelin çizildiği boy, kalçanın dinlenme pozundaki yeri (başlangıç noktasına göre).
       height: round(heightOf(hmd) * scale),
@@ -82,17 +88,19 @@ class ModelClips {
       forward: facing,
       clips: [for (clip in clips) {name: clip.name, frames: clip.frames, seconds: clip.seconds, loop: clip.loop, groundSpeed: round(clip.groundSpeed * scale)}],
       socketFrame: frame,
-      sockets: sockets.length > 0 ? sockets : defaultSockets(hmd, skin.joints, frame, scale),
+      sockets: sockets.length > 0 ? sockets : defaultSockets(hmd, skin.joints, frame, scale, names),
+      // Standart eklem adlarının bu iskeletteki karşılığı: oyun (kemik biçimi, kalça) bunu kullanır.
+      joints: scene.JointNames.toData(resolved),
     };
   }
 
-  // Ayar yoksa Mixamo düzenindeki eklemlere takma noktaları. El noktasının X'i bilekten parmaklara
+  // Ayar yoksa standart eklemlere takma noktaları. El noktasının X'i bilekten parmaklara
   // (ön kol yönünde), Z'si yumruğun deliği boyunca başparmağa: A pozunda başparmak öne bakar.
   // Avuç, ele bağlı köşelerin bileğe yakın yarısının bağlama pozundaki ortası (uzun parmak ve pençe avucu
   // uca kaydırmasın); köşe okunamazsa bileğin ön kol boyunun üçte biri
   // ilerisi. Konumlar ve eksenler bağlama pozuna göredir (deri köşeleri ona bağlıdır): X gövdenin önü
   // (frame), Z yukarı, Y sağ. Dönüş oyunla aynı Heaps nesnesiyle hesaplanır.
-  public static function defaultSockets(hmd : Data, joints : Array<SkinJoint>, facing : Array<Float>, scale : Float) : Array<SocketSpec> {
+  public static function defaultSockets(hmd : Data, joints : Array<SkinJoint>, facing : Array<Float>, scale : Float, ?names : Map<String, String>) : Array<SocketSpec> {
     var bind = bindPose(joints), rest = restPose(joints);
     var pose = [for (i in 0...joints.length) bind[i] != null ? bind[i] : rest[i]];
     var turn = new h3d.scene.Object();
@@ -101,7 +109,7 @@ class ModelClips {
     function toFacing(x : Float, y : Float, z : Float) return new h3d.Vector(x, y, z).transformed3x3(toFacingMatrix);
     var found = [];
     function hand(name : String, joint : String, arm : String) {
-      var a = indexOf(joints, arm), b = indexOf(joints, joint);
+      var a = find(joints, arm, names), b = find(joints, joint, names);
       if (a < 0 || b < 0) return;
       var wrist = pose[b].getPosition();
       var palm = palmOf(boneVertices(hmd, b), wrist);
@@ -128,21 +136,24 @@ class ModelClips {
       m._21 = side.x; m._22 = side.y; m._23 = side.z;
       m._31 = up.x; m._32 = up.y; m._33 = up.z;
       var euler = m.getEulerAngles();
-      found.push({name: name, joint: joint, offset: [round(along.x * reach), round(along.y * reach), round(along.z * reach)],
+      found.push({name: name, joint: joints[b].name, offset: [round(along.x * reach), round(along.y * reach), round(along.z * reach)],
         rotation: [degrees(euler.x), degrees(euler.y), degrees(euler.z)]});
     }
     hand("sag_el", "RightHand", "RightForeArm");
     hand("sol_el", "LeftHand", "LeftForeArm");
     // Sırt göğsün arkasında, bel sağ kalçada, baş başın kökünde: dönüşsüz, karakterin eksenleriyle.
     // Sağ taraf rigden okunur (sağ kolun düştüğü yan).
-    var leftArm = indexOf(joints, "LeftArm"), rightArm = indexOf(joints, "RightArm");
+    var leftArm = find(joints, "LeftArm", names), rightArm = find(joints, "RightArm", names);
     var right = leftArm < 0 || rightArm < 0 ? -1. : toFacing(pose[rightArm]._41 - pose[leftArm]._41, pose[rightArm]._42 - pose[leftArm]._42, 0).y < 0 ? -1. : 1.;
     var fixed : Array<{name : String, joint : String, offset : Array<Float>}> = [
       {name: "sirt", joint: "Spine", offset: [-0.15, 0, 0]},
       {name: "bel", joint: "Hips", offset: [0, 0.16 * right, 0]},
       {name: "bas", joint: "Head", offset: [0, 0, 0]},
     ];
-    for (item in fixed) if (indexOf(joints, item.joint) >= 0) found.push({name: item.name, joint: item.joint, offset: item.offset.copy(), rotation: [0., 0., 0.]});
+    for (item in fixed) {
+      var index = find(joints, item.joint, names);
+      if (index >= 0) found.push({name: item.name, joint: joints[index].name, offset: item.offset.copy(), rotation: [0., 0., 0.]});
+    }
     return found;
   }
 
@@ -196,20 +207,20 @@ class ModelClips {
 
   // Yürürken yere basan ayak geriye kayar: bakış yönü en hızlı klipte bunun tersidir. Klip yoksa
   // kalça çizgisine dik yön. Dosyanın varsayılan pozu bir klibin ilk karesi olabilir, gövde dönük durabilir.
-  static function forwardOf(clips : Array<ClipInfo>, joints : Array<SkinJoint>, rest : Array<h3d.Matrix>) : Array<Float> {
+  static function forwardOf(clips : Array<ClipInfo>, joints : Array<SkinJoint>, rest : Array<h3d.Matrix>, ?names : Map<String, String>) : Array<Float> {
     var fastest : Null<ClipInfo> = null;
     for (clip in clips) if (clip.heading != null && (fastest == null || clip.groundSpeed > fastest.groundSpeed)) fastest = clip;
-    return fastest != null ? fastest.heading : forward(joints, rest);
+    return fastest != null ? fastest.heading : forward(joints, rest, names);
   }
 
-  static function forward(joints : Array<SkinJoint>, rest : Array<h3d.Matrix>) : Array<Float> {
-    var left = indexOf(joints, "LeftUpLeg"), right = indexOf(joints, "RightUpLeg");
+  static function forward(joints : Array<SkinJoint>, rest : Array<h3d.Matrix>, ?names : Map<String, String>) : Array<Float> {
+    var left = find(joints, "LeftUpLeg", names), right = find(joints, "RightUpLeg", names);
     if (left < 0 || right < 0) return [1., 0.];
     var sx = rest[left]._41 - rest[right]._41, sy = rest[left]._42 - rest[right]._42;
     var x = -sy, y = sx;
     var tx = 0., ty = 0.;
     for (pair in [["LeftFoot", "LeftToeBase"], ["RightFoot", "RightToeBase"]]) {
-      var a = indexOf(joints, pair[0]), b = indexOf(joints, pair[1]);
+      var a = find(joints, pair[0], names), b = find(joints, pair[1], names);
       if (a < 0 || b < 0) continue;
       tx += rest[b]._41 - rest[a]._41;
       ty += rest[b]._42 - rest[a]._42;
@@ -233,7 +244,7 @@ class ModelClips {
     return scale;
   }
 
-  static function stepOf(hmd : Data, animation : h3d.anim.Animation, height : Float) : Null<{speed : Float, heading : Null<Array<Float>>}> {
+  static function stepOf(hmd : Data, animation : h3d.anim.Animation, height : Float, ?names : Map<String, String>) : Null<{speed : Float, heading : Null<Array<Float>>}> {
     var skin = skinOf(hmd);
     var linear = Std.downcast(animation, LinearAnimation);
     if (skin == null || linear == null) return null;
@@ -243,7 +254,7 @@ class ModelClips {
       var track = Std.downcast(object, LinearObject);
       if (track != null && track.frames != null) tracks.set(object.objectName, track.frames);
     }
-    var feet = [indexOf(joints, "LeftFoot"), indexOf(joints, "RightFoot")].filter(i -> i >= 0);
+    var feet = [find(joints, "LeftFoot", names), find(joints, "RightFoot", names)].filter(i -> i >= 0);
     if (feet.length == 0) return null;
     var order = depthOrder(joints);
     var world = [for (_ in joints) new h3d.Matrix()];
@@ -269,10 +280,40 @@ class ModelClips {
           sumY += dy;
         }
     }
+    var speed = Math.NaN;
+    // Koşuda ayağın yere değdiği kareler kısa ve ayak o sürede hızını değiştirir (basar, sonra iter): eşik altında
+    // art arda kare az kalırsa (karelerin beşte birinden az) temas, ayağın en alçak çeyreği sayılır ve temas boyunca
+    // ortalama hız alınır (toplam yer değiştirme / süre). Oynatma bu hızla ayarlanınca temas boyunca kayma en aza iner.
+    if (speeds.length < Math.max(3, linear.frameCount * CONTACT_SAMPLES)) {
+      speeds = [];
+      sumX = 0;
+      sumY = 0;
+      var distance = 0., steps = 0;
+      for (path in paths) {
+        var lowest = 1e30, highest = -1e30;
+        for (point in path) {
+          lowest = Math.min(lowest, point.z);
+          highest = Math.max(highest, point.z);
+        }
+        var limit = lowest + Math.max(height * PLANTED_FRACTION, (highest - lowest) * CONTACT_FRACTION);
+        for (i in 1...path.length)
+          if (path[i].z <= limit && path[i - 1].z <= limit) {
+            var dx = path[i].x - path[i - 1].x, dy = path[i].y - path[i - 1].y;
+            distance += Math.sqrt(dx * dx + dy * dy);
+            steps++;
+            sumX += dx;
+            sumY += dy;
+          }
+      }
+      if (steps > 0) {
+        speed = distance / steps * linear.sampling;
+        speeds.push(speed);
+      }
+    }
     if (speeds.length == 0) return {speed: 0, heading: null};
     speeds.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
     var length = Math.sqrt(sumX * sumX + sumY * sumY);
-    var speed = speeds[Std.int(speeds.length / 2)];
+    if (Math.isNaN(speed)) speed = speeds[Std.int(speeds.length / 2)];
     // Yerinde duran klipte ayak kaymaz: yön anlamsızdır.
     var moving = speed > height * 0.05;
     return {speed: moving ? speed : 0, heading: moving && length > 1e-6 ? [round(-sumX / length), round(-sumY / length)] : null};
@@ -369,8 +410,9 @@ class ModelClips {
 
   // Kollar başka klibin ilk karesinden: köprücükten ele bütün kol eklemleri o duruşta sabit kalır, gövde ve
   // bacaklar hedef klipten oynar. İki klip de önce rige yeniden hedeflenmiş olmalı. Değişen iz sayısı döner.
-  public static function holdArms(target : h3d.anim.Animation, pose : h3d.anim.Animation, rig : Data) : Int {
+  public static function holdArms(target : h3d.anim.Animation, pose : h3d.anim.Animation, rig : Data, ?names : Map<String, String>) : Int {
     var skin = skinOf(rig);
+    var shoulders = [scene.JointNames.actual(names, "LeftShoulder"), scene.JointNames.actual(names, "RightShoulder")];
     var to = Std.downcast(target, LinearAnimation), from = Std.downcast(pose, LinearAnimation);
     if (skin == null || to == null || from == null) return 0;
     var arms = new Map<String, Bool>();
@@ -378,7 +420,7 @@ class ModelClips {
       var j = i;
       while (j >= 0) {
         var name = skin.joints[j].name;
-        if (name == "LeftShoulder" || name == "RightShoulder") {
+        if (shoulders.indexOf(name) >= 0) {
           arms.set(skin.joints[i].name, true);
           break;
         }
@@ -454,6 +496,12 @@ class ModelClips {
   static function indexOf(joints : Array<SkinJoint>, name : String) : Int {
     for (i in 0...joints.length) if (joints[i].name == name) return i;
     return -1;
+  }
+
+  // Standart adla (Hips, LeftFoot...) eklem: eşlemedeki ad, yoksa iskeletin adlarından çözülen.
+  static function find(joints : Array<SkinJoint>, standard : String, ?names : Map<String, String>) : Int {
+    if (names == null) names = scene.JointNames.resolve([for (joint in joints) joint.name]);
+    return indexOf(joints, scene.JointNames.actual(names, standard));
   }
 
   static function round(value : Float) : Float {
