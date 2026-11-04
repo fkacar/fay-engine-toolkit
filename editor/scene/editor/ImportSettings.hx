@@ -23,7 +23,9 @@ typedef SocketSpec = {name : String, joint : String, offset : Array<Float>, rota
 // sockets: takma noktaları (boşsa iskeletli modelde varsayılanlar), joints: standart eklem adı → iskeletteki ad
 // (tanınmayan iskelet için; bkz. scene.JointNames), length: modelin en uzun kenarı metre (iskeletsiz modeller;
 // silah paketleri 1 birime sığdırılmış gelir), grip: true ise iskeletsiz modele "tutamak" tahmin edilir (elle verilmemişse),
-// blender: true ise FBX önce Blender'dan geçer (başka aracın ölçeğiyle yazılmış dosya; bkz. BlenderConverter).
+// blender: true ise FBX önce Blender'dan geçer (başka aracın ölçeğiyle yazılmış dosya; bkz. BlenderConverter),
+// skins: modelin kaplamaları, kaynağa göre bir kalıp ("textures/{ad}_skin*.png"; {ad} model dosyasının adı, tek *);
+// eşleşenler modelin yanına kopyalanır, oyun çeşitlemede birini seçer.
 // Klasör ayarı (klasor.aktarim.json): klasördeki ve alt klasörlerdeki bütün modeller için ortak klipler, takma
 // noktaları ve eklem adları; modelin kendi dosyası aynı adlı olanı ezer. Aynı iskeletli bir paket tek dosyayla alınır.
 // Dosya elle de yazılabilir; editör ve ajan aynı biçimi okur, aynı sırayla yazar.
@@ -41,6 +43,7 @@ class ImportSettings {
   public var length : Null<Float> = null;
   public var grip : Null<Bool> = null;
   public var blender : Null<Bool> = null;
+  public var skins : Null<String> = null;
   // Etkin ayarı oluşturan klasör dosyaları (en uzaktan en yakına); bilgi için.
   public var inherited : Array<String> = [];
 
@@ -93,6 +96,7 @@ class ImportSettings {
     if (from.length != null) into.length = from.length;
     if (from.grip != null) into.grip = from.grip;
     if (from.blender != null) into.blender = from.blender;
+    if (from.skins != null) into.skins = from.skins;
   }
 
   public static function readFile(file : String) : ImportSettings {
@@ -113,6 +117,7 @@ class ImportSettings {
     if (raw.length != null) settings.length = checkLength(raw.length);
     if (raw.grip == true || raw.grip == false) settings.grip = raw.grip;
     if (raw.blender == true || raw.blender == false) settings.blender = raw.blender;
+    if (raw.skins != null) settings.skins = checkSkins(raw.skins);
     return settings;
   }
 
@@ -121,6 +126,31 @@ class ImportSettings {
     if (min == null || max == null || min.length != 3 || max.length != 3) throw "kırpma kutusu {min: [x, y, z], max: [x, y, z]} olmalı";
     for (i in 0...3) if (!Std.isOfType(min[i], Float) || !Std.isOfType(max[i], Float) || min[i] > max[i]) throw 'kırpma kutusunda min, max\'tan büyük ya da sayı değil: ${haxe.Json.stringify(box)}';
     return {min: min, max: max, note: box.note};
+  }
+
+  // Kaplama kalıbı: kaynağın klasörüne göre, klasörden çıkmaz, dosya adında en çok bir *. Boş metin kaldırır.
+  public static function checkSkins(value : Dynamic) : Null<String> {
+    if (!Std.isOfType(value, String)) throw 'skins bir kalıp olmalı ("textures/{ad}_skin*.png"): $value';
+    var pattern = StringTools.replace((value : String), "\\", "/");
+    if (pattern == "") return null;
+    if (pattern.indexOf("..") >= 0 || StringTools.startsWith(pattern, "/")) throw 'skins kaynağın klasöründe kalmalı: $pattern';
+    if (Path.withoutDirectory(pattern).split("*").length > 2 || Path.directory(pattern).indexOf("*") >= 0) throw 'skins dosya adında en çok bir * içerebilir: $pattern';
+    return pattern;
+  }
+
+  // Kalıba uyan dosyalar (kaynağın klasörüne göre yol, sıralı).
+  public static function skinFiles(source : String, pattern : Null<String>) : Array<String> {
+    if (pattern == null) return [];
+    var name = Path.withoutExtension(Path.withoutDirectory(source));
+    var resolved = StringTools.replace(pattern, "{ad}", name);
+    var base = Path.directory(StringTools.replace(source, "\\", "/"));
+    var folder = Path.directory(resolved) == "" ? base : '$base/${Path.directory(resolved)}';
+    if (!FileSystem.exists(folder) || !FileSystem.isDirectory(folder)) return [];
+    var parts = Path.withoutDirectory(resolved).split("*");
+    var found = [for (entry in FileSystem.readDirectory(folder))
+      if (parts.length == 1 ? entry == parts[0] : StringTools.startsWith(entry, parts[0]) && StringTools.endsWith(entry, parts[1]) && entry.length >= parts[0].length + parts[1].length) '$folder/$entry'];
+    found.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
+    return found;
   }
 
   public static function checkLength(value : Dynamic) : Float {
@@ -192,6 +222,7 @@ class ImportSettings {
     if (length != null) extra += ',\n  "length": ${checkLength(length)}';
     if (grip != null) extra += ',\n  "grip": $grip';
     if (blender != null) extra += ',\n  "blender": $blender';
+    if (skins != null) extra += ',\n  "skins": ${haxe.Json.stringify(checkSkins(skins))}';
     File.saveContent(file == null ? path(source) : file, '{\n  "trim": ${list(boxes)},\n  "clips": ${list(lines)},\n  "sockets": ${list(points)}$extra\n}\n');
   }
 }

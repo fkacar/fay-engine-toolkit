@@ -124,6 +124,7 @@ class EditTools {
         length: {type: "number", description: "İskeletsiz modelin (silah, eşya) en uzun kenarı, metre; model bu boya ölçeklenir (silah paketleri 1 birime sığdırılmış gelir). 0 kaldırır"},
         grip: {type: ["boolean", "string"], description: "true: iskeletsiz modele tutamak noktası şekilden tahmin edilir (ince uç sap; elle verilen tutamak önce gelir). \"klasorden\" kaldırır"},
         blender: {type: ["boolean", "string"], description: "true: FBX önce Blender'la yeniden yazılır (başka aracın ölçeğiyle gelen dosya, kemikler 100 kat büyükse). GLB/glTF/OBJ her zaman çevrilir. \"klasorden\" kaldırır"},
+        skins: {type: "string", description: "Kaplamalar: kaynağın klasörüne göre kalıp, örn. \"textures/{ad}_skin*.png\" ({ad} model dosyasının adı, tek *). Uyan dokular modelin yanına kopyalanır, adları model.json'un skins alanına yazılır; oyun çeşitlemede her karaktere birini seçer. \"\" kaldırır"},
         folder: {type: ["boolean", "string"], description: "Ayarları modelin dosyası yerine klasör ayarına yaz: true kaynağa en yakın klasor.aktarim.json (yoksa kaynağın klasörü), metin ise assets altında kaynağın üst klasörlerinden biri. trim klasöre yazılmaz"},
       }, required: ["source"]}});
     server.add({name: "model_info", readOnly: true, run: modelInfo,
@@ -604,7 +605,7 @@ class EditTools {
   function importModel(args : Dynamic) : AgentReply {
     var source = modelSource(args.source);
     var file = settingsFile(source, args.folder);
-    if (args.trim != null || args.clips != null || args.sockets != null || args.joints != null || args.length != null || args.grip != null || args.blender != null) {
+    if (args.trim != null || args.clips != null || args.sockets != null || args.joints != null || args.length != null || args.grip != null || args.blender != null || args.skins != null) {
       if (file != null && args.trim != null) throw "trim klasör ayarına yazılmaz, yalnızca modelin kendi dosyasına (folder olmadan)";
       var settings = file == null ? ImportSettings.read(source) : ImportSettings.readFile(file);
       if (args.trim != null) {
@@ -637,6 +638,7 @@ class EditTools {
       if (args.length != null) settings.length = args.length == 0 ? null : ImportSettings.checkLength(args.length);
       settings.grip = flag(args.grip, settings.grip, "grip");
       settings.blender = flag(args.blender, settings.blender, "blender");
+      if (args.skins != null) settings.skins = ImportSettings.checkSkins(args.skins);
       settings.write(source, file);
     }
     editor.show('Ajan modeli dönüştürüyor: $source. Büyük modellerde editör bir süre tepki vermez');

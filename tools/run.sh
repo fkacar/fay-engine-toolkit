@@ -62,7 +62,10 @@ done
 haxe "$HXML"
 
 # Mac'te HashLink sanal makinesi çalışmaz: Haxe C üretir, clang yerel uygulamaya derler.
-clang -std=c11 -O0 -g -w -I "$C_DIR" -I "$HL_DIR/include" -o "$OUTPUT" "$C_DIR/main.c" \
+# -O2 (karar 4 Kasım 2026): -O0'a göre yaklaşık 7 kat hızlı (fizik ölçümü), derleme 8 sn uzun; -g hata ayıklamayı korur.
+# -fwrapv şart: Haxe'nin Int'i taşınca sarar; C'de işaretli taşma tanımsızdır, eniyileme açıkken karma ve rastgele
+# sayı döngüleri bozulur (FNV tohumu her metinde 0 çıkıyordu).
+clang -std=c11 -O2 -g -w -fwrapv -I "$C_DIR" -I "$HL_DIR/include" -o "$OUTPUT" "$C_DIR/main.c" \
   -Wl,-rpath,"@executable_path/../$HL_DIR" -Wl,-dead_strip_dylibs \
   "$HL_DIR/libhl.dylib" "$HL_DIR"/*.hdll
 

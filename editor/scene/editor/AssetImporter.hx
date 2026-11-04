@@ -95,6 +95,18 @@ class AssetImporter {
       } else problems.push("tutamak tahmin edilemedi; ayar dosyasında elle verin");
     }
     var info = ModelClips.describe(hmd, clips, sockets, names);
+    // Kaplamalar modelin yanına; adları bilgi dosyasına (çeşitleme birini seçer).
+    var skins = [for (file in ImportSettings.skinFiles(source, settings.skins)) {
+      var name = Path.withoutDirectory(file);
+      File.copy(file, '${Path.directory(target)}/$name');
+      name;
+    }];
+    if (settings.skins != null && skins.length == 0) problems.push('kaplama kalıbına uyan dosya yok: ${settings.skins}');
+    if (skins.length > 0) {
+      if (info == null) info = {};
+      Reflect.setField(info, "skins", skins);
+      notes.push('${skins.length} kaplama');
+    }
     if (info != null) File.saveContent(infoPath(target), haxe.Json.stringify(info, null, "  ") + "\n");
     else if (FileSystem.exists(infoPath(target))) FileSystem.deleteFile(infoPath(target));
     forgetMissingFiles();
@@ -220,6 +232,7 @@ class AssetImporter {
       length: settings.length,
       grip: settings.grip,
       blender: settings.blender,
+      skins: [for (file in ImportSettings.skinFiles(source, settings.skins)) Path.withoutDirectory(file)],
       jointOverrides: scene.JointNames.toData(settings.joints),
       inherited: settings.inherited,
       standardJoints: names == null ? null : scene.JointNames.toData(names),

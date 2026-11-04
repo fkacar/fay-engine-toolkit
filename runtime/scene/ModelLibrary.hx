@@ -9,6 +9,11 @@ class ModelLibrary {
     return cache.loadModel(hxd.Res.load(ModelRef.file(reference)).toModel());
   }
 
+  // Doku (çeşitlemenin kaplaması gibi); Heaps kaynağı önbellekler, aynı doku bir kez yüklenir.
+  public static function texture(path : String) : h3d.mat.Texture {
+    return hxd.Res.load(path).toTexture();
+  }
+
   // Başvurunun dosyası oyunda var mı (bilinmeyen kimlik, boş başvuru ya da eksik dosya: hayır).
   public static function exists(reference : String) : Bool {
     var file = ModelRef.file(reference);

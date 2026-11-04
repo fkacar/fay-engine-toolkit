@@ -264,6 +264,7 @@ class AssetBrowser {
         checked.length = settings.length == null ? null : ImportSettings.checkLength(settings.length);
         checked.grip = settings.grip;
         checked.blender = settings.blender;
+        checked.skins = settings.skins == null ? null : ImportSettings.checkSkins(settings.skins);
         checked.write(source);
         effective = ImportSettings.effective(source);
         pending = editor.importer.pending();
@@ -292,6 +293,18 @@ class AssetBrowser {
   function drawModel(source : String) {
     ImGui.text("Model");
     if (joints.length == 0) drawRigid();
+    // Kaplamalar: modelin yanına kopyalanan doku seçenekleri; çeşitleme her karaktere birini verir.
+    var pattern = settings.skins == null ? "" : settings.skins;
+    ImGui.pushItemWidth(300 * editor.interfaceScale);
+    if (ImGui.inputText("Kaplamalar##kaplama", pattern)) settings.skins = pattern == "" ? null : pattern;
+    ImGui.popItemWidth();
+    if (ImGui.isItemHovered()) ImGui.setTooltip("Kaynağın klasörüne göre kalıp, örn. textures/{ad}_skin*.png ({ad} model dosyasının adı, tek *). Uyan dokular modelin yanına kopyalanır; çeşitleme her karaktere birini seçer.");
+    if (settings.skins == null && effective.skins != null) {
+      ImGui.sameLine();
+      ImGui.textDisabled('klasörden: ${effective.skins}');
+    }
+    var found = ImportSettings.skinFiles(source, settings.skins != null ? settings.skins : effective.skins);
+    if (found.length > 0) ImGui.textDisabled('${found.length} kaplama: ${[for (file in found) Path.withoutDirectory(file)].join(", ")}');
     settings.blender = choice("Blender'dan geçir", "blender", settings.blender, effective.blender,
       "FBX önce Blender'la yeniden yazılır (başka aracın ölçeğiyle gelen dosya). GLB, glTF ve OBJ her zaman Blender'la çevrilir.");
     if (BlenderConverter.handles(source)) ImGui.textDisabled("Bu dosya Blender'la FBX'e çevrilir (Blender kurulu olmalı).");

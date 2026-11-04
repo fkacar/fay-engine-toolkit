@@ -134,6 +134,16 @@ class ExamTools {
         var target = named(spec.name);
         if (target == null) return {ok: false, detail: '${spec.name} yok veya yüklü değil'};
         return {ok: matches(target, spec.components, base), detail: [for (c in target.components) describe(c)].join("; ")};
+      case "model_file":
+        // Model alanı katalog kimliği yazıyor ve kimlik bu dosyaya çıkıyor (kimliğin adı ajana bırakılır).
+        var target = named(spec.name);
+        if (target == null) return {ok: false, detail: '${spec.name} yok veya yüklü değil'};
+        var found = component(target, spec.component);
+        if (found == null) return {ok: false, detail: '${spec.component} bileşeni yok'};
+        var value = Std.string(found.readField(spec.field));
+        var file = scene.ModelRef.file(value);
+        var ok = value != "" && !scene.ModelRef.isPath(value) && file == spec.file;
+        return {ok: ok, detail: scene.ModelRef.isPath(value) ? 'alanda dosya yolu var: $value' : '$value → ${file == "" ? "(çözülmedi)" : file}'};
       case "walkable":
         var nav = editor.scene.service(NavWorld);
         var owners = created.filter(entity -> matches(entity, [{type: spec.component}], base));

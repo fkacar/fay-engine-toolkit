@@ -56,9 +56,14 @@ class DataStore {
   }
 
   // Komutlar tablonun tamamını metin olarak değiştirir; null tabloyu kaldırır.
+  // Tablo uygulanınca (düzenleme, geri alma, ajan) hemen çağrılır: oyun kendi önbelleğini boşaltır, aynı karedeki
+  // sonraki okuma yeni tabloyu görür.
+  public var onApplied : Null<String -> Void>;
+
   public function apply(name : String, text : Null<String>) {
     if (text == null) tables.remove(name);
     else tables.set(name, DataTable.read(name, text));
+    if (onApplied != null) onApplied(name);
   }
 
   public function isDirty() {
