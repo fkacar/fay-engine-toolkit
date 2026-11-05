@@ -41,6 +41,14 @@ class NavWorld {
     return !isBlocked(nodeX(x), nodeY(y));
   }
 
+  // Yürünebilir yer: nokta yürünebilirse kendisi, değilse en yakın açık düğümün ortası; yakında açık düğüm yoksa null.
+  // Sahneye bir şey konacakken (uzaktan dönen grup) bina ya da engel içine düşmesin diye.
+  public function nearestWalkable(x : Float, y : Float) : Null<NavPoint> {
+    if (isWalkable(x, y)) return {x: x, y: y};
+    var node = nearestOpen(nodeX(x), nodeY(y));
+    return node < 0 ? null : pointOf(node);
+  }
+
   // Son nokta hedeftir. Hedefe yol yoksa ulaşılabilen en yakın yere kadar gider.
   public function findPath(fromX : Float, fromY : Float, toX : Float, toY : Float) : Array<NavPoint> {
     var goal : NavPoint = {x: toX, y: toY};

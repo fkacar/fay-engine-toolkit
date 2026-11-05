@@ -157,6 +157,9 @@ class ExamTools {
         var steps : Array<Dynamic> = try PlayTests.load(name).steps catch (e : Dynamic) [];
         if (spec.item != null && !Lambda.exists(steps, step -> step.expect != null && step.expect.item == spec.item))
           return {ok: false, detail: '$name testi ${spec.item} eşyasını beklemiyor'};
+        // Beklentinin türü (örneğin oyunun "patrol" beklentisi): testte o türden bir expect adımı olmalı.
+        if (spec.expect != null && !Lambda.exists(steps, step -> step.expect != null && Reflect.hasField(step.expect, spec.expect)))
+          return {ok: false, detail: '$name testinde ${spec.expect} beklentisi yok'};
         // Kayıttan başlayan test: oyuncunun kaydındaki hatayı yeniden üretip düzeltmeyi doğrulamak için.
         if (spec.save == true && (try PlayTests.load(name).save catch (e : Dynamic) null) == null)
           return {ok: false, detail: '$name testi bir kayıttan başlamıyor (save alanı yok)'};
