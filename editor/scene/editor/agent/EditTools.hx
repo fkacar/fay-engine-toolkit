@@ -78,6 +78,10 @@ class EditTools {
       ids: {type: "array", items: {type: "string"}}, focus: {type: "boolean"},
     }, setSelection, false, ["ids"]);
     tool("save", "Sahneyi, tabloları ve diyalogları kaydeder. Yalnızca tasarımcı isteyince kullan.", {}, _ -> save(), false);
+    tool("load_cells", "Dünyanın hücrelerini yükler (tasarımcının Dünya sekmesindeki haritada hücreye tıklaması gibi): cells [hücre kimlikleri] "
+      + "ya da around [x,y] ve radius (metre, varsayılan 0: yalnızca o noktanın hücresi). Yüklü olmayan hücredeki nesne sahnede yoktur; "
+      + "find_entities, edit_scene ve set_camera ondan önce. Geri alma adımı yazmaz. Sonuç: yüklenen ve zaten yüklü hücreler.",
+      {cells: {type: "array", items: {type: "integer"}}, around: {type: "array", items: {type: "number"}}, radius: {type: "number"}}, loadCells, false);
     tool("undo", "Geri alır (Cmd+Z). steps kadar adım.", {steps: {type: "integer"}}, args -> step(args.steps, true), false);
     tool("redo", "İleri alır. steps kadar adım.", {steps: {type: "integer"}}, args -> step(args.steps, false), false);
     tool("find_walkable_point", "x, y'ye en yakın yürünebilir nokta (yol ızgarasına göre), radius metre içinde.", {
@@ -531,6 +535,37 @@ class EditTools {
       conflicts: [for (conflict in editor.diskGuard.conflicts) {path: conflict.path, units: conflict.units}],
       unsavedFiles: editor.document.unsavedFiles(),
     };
+  }
+
+  function loadCells(args : Dynamic) : Dynamic {
+    var world = editor.document.world;
+    if (world == null) throw "Açık belge dünya değil (tek sahne)";
+    var data = world.data, wanted : Array<Int> = [];
+    if (args.cells != null) for (cell in (args.cells : Array<Dynamic>)) wanted.push(Std.int(cell));
+    if (args.around != null) {
+      var x : Float = args.around[0], y : Float = args.around[1], radius : Float = args.radius == null ? 0 : args.radius;
+      var step = data.cellSize, sx = x - radius;
+      while (sx <= x + radius + 1e-6) {
+        var sy = y - radius;
+        while (sy <= y + radius + 1e-6) {
+          var cell = data.cellAt(sx, sy);
+          if (cell >= 0 && wanted.indexOf(cell) < 0) wanted.push(cell);
+          sy += step;
+        }
+        sx += step;
+      }
+    }
+    if (wanted.length == 0) throw "cells ya da around gerekli";
+    var loaded = [], already = [];
+    for (cell in wanted) {
+      if (cell < 0 || cell >= data.columns * data.rows) throw 'Dünyada böyle hücre yok: $cell';
+      if (world.isLoaded(cell)) already.push(cell);
+      else {
+        world.load(cell);
+        loaded.push(cell);
+      }
+    }
+    return {loaded: loaded, alreadyLoaded: already};
   }
 
   function step(count : Null<Int>, back : Bool) : Dynamic {
