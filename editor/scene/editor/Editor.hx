@@ -408,6 +408,9 @@ class Editor {
     PlayTests.prepare(test);
     var options = new PlayOptions(document.resourcePath());
     options.save = from;
+    // Testin başlangıç saati (hour, 0–24); yoksa ortamın saati.
+    var hour : Null<Float> = test.hour;
+    options.hour = hour;
     session.start(options);
     return null;
   }
@@ -465,7 +468,9 @@ class Editor {
     }
     if ((commands.isDirty || !FileSystem.exists(document.path)) && !document.save()) return;
     var view = scene.root.getScene().camera;
-    session.start(new PlayOptions(document.resourcePath(), [view.pos.x, view.pos.y, view.pos.z, view.target.x, view.target.y, view.target.z]));
+    var options = new PlayOptions(document.resourcePath(), [view.pos.x, view.pos.y, view.pos.z, view.target.x, view.target.y, view.target.z]);
+    options.hour = document.prefs.playHour;
+    session.start(options);
     show("Oyun açılıyor");
   }
 
@@ -670,6 +675,17 @@ class Editor {
     if (ImGui.beginMenu("Oyun")) {
       if (ImGui.menuItem("Buradan oyna", "F5", false, !session.isRunning)) play();
       if (saveInspector != null && ImGui.menuItem("Kayıttan oyna…")) savesWindow.open();
+      // Buradan oynanın başlangıç saati: ortamın saati ya da seçilen saat (kişiye özel).
+      if (ImGui.beginMenu("Başlangıç saati")) {
+        var chosen = document.prefs.playHour;
+        if (ImGui.menuItem("Ortamın saati", null, chosen == null)) document.prefs.setPlayHour(null);
+        if (ImGui.menuItem("Seçilen saat", null, chosen != null) && chosen == null) document.prefs.setPlayHour(12);
+        if (chosen != null) {
+          var hour : Float = chosen;
+          if (ImGui.sliderDouble("Saat##baslangic", hour, 0, 24, "%.1f")) document.prefs.setPlayHour(Math.round(hour * 10) / 10);
+        }
+        ImGui.endMenu();
+      }
       // Oyun dağıtılırken: oyunculara ulaşan durumlu nesneler korunmaya başlar (silinince uyarı, eşleme).
       if (ImGui.menuItem("Yayın kimliklerini kaydet")) {
         var recorded = releaseIds.record();

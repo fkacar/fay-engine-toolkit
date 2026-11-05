@@ -14,6 +14,8 @@ class EditorPrefs {
   public var recent(default, null) : Array<String> = [];
   public var layoutVersion(default, null) = 0;
   public var hiddenMarkers(default, null) : Array<String> = [];
+  // "Buradan oyna"nın başlangıç saati; null ise ortamın saati.
+  public var playHour(default, null) : Null<Float>;
 
   var hidden : DynamicAccess<Array<String>> = {};
   var groups : DynamicAccess<Array<Array<String>>> = {};
@@ -29,6 +31,7 @@ class EditorPrefs {
       if (saved.cells != null) cells = saved.cells;
       if (saved.layoutVersion != null) layoutVersion = saved.layoutVersion;
       if (saved.hiddenMarkers != null) hiddenMarkers = saved.hiddenMarkers;
+      if (saved.playHour != null) playHour = saved.playHour;
     } catch (e : Dynamic) {
       // Bozuk ayar dosyası editörü durdurmamalı, varsayılanlarla devam edilir.
     }
@@ -36,6 +39,11 @@ class EditorPrefs {
 
   public function setHiddenMarkers(types : Array<String>) {
     hiddenMarkers = types;
+    save();
+  }
+
+  public function setPlayHour(hour : Null<Float>) {
+    playHour = hour;
     save();
   }
 
@@ -86,6 +94,7 @@ class EditorPrefs {
 
   function save() {
     if (!FileSystem.exists(DIRECTORY)) FileSystem.createDirectory(DIRECTORY);
-    File.saveContent(FILE, haxe.Json.stringify({recent: recent, hidden: hidden, groups: groups, cells: cells, layoutVersion: layoutVersion, hiddenMarkers: hiddenMarkers}, null, "  "));
+    File.saveContent(FILE, haxe.Json.stringify({recent: recent, hidden: hidden, groups: groups, cells: cells, layoutVersion: layoutVersion, hiddenMarkers: hiddenMarkers,
+      playHour: playHour}, null, "  "));
   }
 }
