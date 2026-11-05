@@ -1,96 +1,98 @@
 # Fay Engine Toolkit
 
-Haxe + Heaps ile yazılan 3D oyunlarımızın ortak sahne altyapısı ve editörü.
+Shared scene infrastructure and editor for our 3D games written in Haxe + Heaps.
 
-| Klasör | İçerik | Nereye girer |
+Türkçe: [README.tr.md](README.tr.md)
+
+| Folder | Contents | Used by |
 |---|---|---|
-| `runtime/` | Sahne formatı, bileşen modeli, kalıcı kimlikler, `@:editable` macro'su | Oyun ve editör |
-| `editor/` | Docking kabuğu, Hierarchy, Inspector, komut sistemi | Yalnızca `-D scene_editor` derlemesi |
-| `tests/` | Testler | Hiçbiri |
-| `template/` | Yeni oyun için başlangıç projesi | Yeni proje |
-| `tools/` | Çalıştırma, `hlimgui` derleme ve proje oluşturma script'leri | Hiçbiri |
-| `vendor/hashlink/` | Mac için sabit HashLink kitaplıkları | Mac derlemesi |
-| `third_party/hlimgui` | Commit'e sabit Dear ImGui binding'i | Editör |
+| `runtime/` | Scene format, component model, persistent IDs, the `@:editable` macro | Game and editor |
+| `editor/` | Docking shell, Hierarchy, Inspector, command system | Only the `-D scene_editor` build |
+| `tests/` | Tests | None |
+| `template/` | Starter project for a new game | New projects |
+| `tools/` | Scripts for running, building `hlimgui` and creating projects | None |
+| `vendor/hashlink/` | Pinned HashLink libraries for Mac | Mac build |
+| `third_party/hlimgui` | Dear ImGui binding pinned to a commit | Editor |
 
-## Yeni oyun
+The editor's interface is in Turkish. Where this document names a menu, panel or button, the Turkish name is given as it appears on screen, with an English gloss.
+
+## New game
 
 ```sh
-sh libs/scene-toolkit/tools/new-project.sh ../yeni-oyun
-cd ../yeni-oyun
+sh libs/scene-toolkit/tools/new-project.sh ../new-game
+cd ../new-game
 ./run.sh editor
 ```
 
-Şablon araç takımını `libs/scene-toolkit` altına git submodule olarak ekler ve bulunduğun commit'e sabitler.
+The template adds the toolkit under `libs/scene-toolkit` as a git submodule and pins it to the commit you are on.
 
-Toolkit ve oyun birlikte `./push.sh "mesaj"` ile gönderilir, sıra elle yönetilmez. Ayrıntı için `tools/push.sh` başındaki açıklamaya bak.
+The toolkit and the game are pushed together with `./push.sh "message"`; the order is not managed by hand. See the comment at the top of `tools/push.sh` for details.
 
-## Oyuna bağlama
+## Adding it to a game
 
-Oyunlar bu repoyu `libs/scene-toolkit` yoluna submodule olarak ekler. Klonlarken `git clone --recursive` kullanılır. Sonradan alınan değişiklikler için `git submodule update --init --recursive` çalıştırılır.
+Games add this repository as a submodule at `libs/scene-toolkit`. Clone with `git clone --recursive`. For changes pulled later, run `git submodule update --init --recursive`.
 
-Repo gizlidir, ekipteki herkesin erişim izni olmalıdır.
-
-## Bileşen yazmak
+## Writing a component
 
 ```haxe
 @:component("house")
 class HouseComponent extends Component {
-  @:editable("Yükseklik", 2, 12) public var height : Float = 4;
+  @:editable("Height", 2, 12) public var height : Float = 4;
 
   override function onCreate() {
-    // Görseli kur. Oyunda ve editörde çalışır.
+    // Build the visuals. Runs in the game and in the editor.
   }
 
   override function onUpdate(dt : Float) {
-    // Yalnızca oyunda çalışır.
+    // Runs only in the game.
   }
 }
 ```
 
-Bileşen `ComponentRegistry.register` ile kaydedilir. Alan tipi açıkça `Float`, `Int`, `Bool`, `String`, `Array<String>` veya `Array<Float>` olmalıdır.
+A component is registered with `ComponentRegistry.register`. The field type must be written out: `Float`, `Int`, `Bool`, `String`, `Array<String>` or `Array<Float>`.
 
-Metin alanının anlamı işaretlenirse Inspector uygun girişi gösterir, kayıt doğrulaması da bakar:
-
-```haxe
-@:editable("Model") @:asset public var path : String = "";     // Asset Browser'dan sürüklenir, dosya aranır
-@:editable("Hedef") @:entity public var target : String = "";  // Listeden seçilir, nesne aranır
-@:editable("Parça") @:prefab public var part : String = "";     // Prefab listesinden seçilir, dosya aranır
-@:editable("Tür") @:choice("kolay", "zor") public var kind : String = "kolay";  // Açılır liste
-@:editable("Renk") @:color public var tint : Int = 0xFF8000;    // Renk seçici
-```
-
-Tablo ve diyalog alanları:
+If a text field's meaning is marked, the Inspector shows a suitable input and save validation checks it:
 
 ```haxe
-@:editable("Fraksiyon") @:ref("fraksiyonlar") public var faction : String = "tarafsiz";  // res/data/fraksiyonlar.table.json
-@:editable("Diyalog") @:dialog public var dialog : String = "";                          // res/data/dialogs/<id>.dialog.json
+@:editable("Model") @:asset public var path : String = "";     // Dragged from the Asset Browser; the file is checked
+@:editable("Target") @:entity public var target : String = ""; // Picked from a list; the object is checked
+@:editable("Part") @:prefab public var part : String = "";     // Picked from the prefab list; the file is checked
+@:editable("Kind") @:choice("easy", "hard") public var kind : String = "easy";  // Drop-down list
+@:editable("Color") @:color public var tint : Int = 0xFF8000;  // Color picker
 ```
 
-Tabloda olmayan satır veya olmayan diyalog derleme uyarısı verir ama derlemeyi durdurmaz, editörde Uyarılar panelinde görünür. Bunlar kod değil içeriktir: bir tasarımcının silmesi veya iki kişinin birleştirmesi ekibin editörünü açılmaz hale getirmemelidir. Veri paneli kullanılan satırın silinmesini ve kimliğinin değişmesini engeller (`scene.editor.DataUsage`). Kod tarafındaki uyuşmazlıklar, yani bileşen, alan ve `@:choice` seçenekleri, derlemeyi durdurmaya devam eder.
+Table and dialogue fields:
 
-Bileşen `storyLinks()` ile görev bağlantılarını bildirir (`scene.story.StoryLink`): bekler veya yayar (olay), okur veya ayarlar (değişken), ister, verir veya alır (eşya), başlatır (diyalog). Uyarılar ve ajanın `explain_quest` aracı bunları eşleştirir. Bileşen `title()` ile Türkçe adını, `category()` ile "Bileşen ekle" grubunu, `issues()` ile Uyarılar paneline düşecek kendi kurallarını verir. `addable()` grup adları döndürürse Inspector bileşenin altında "+ Grup" düğmeleri gösterir; tetikleyici `[TriggerCondition.CATEGORY, TriggerAction.CATEGORY]` döndürür.
+```haxe
+@:editable("Faction") @:ref("factions") public var faction : String = "neutral";  // res/data/factions.table.json
+@:editable("Dialogue") @:dialog public var dialog : String = "";                  // res/data/dialogs/<id>.dialog.json
+```
 
-`@:choice` alanı `String` olmalı ve varsayılanı seçeneklerden biri olmalıdır. Seçenek koddan çıkarılınca o değeri kullanan sahne, prefab veya prefab farkı derlemeyi durdurur.
+A row missing from the table, or a missing dialogue, gives a compile warning but does not stop the build; in the editor it shows in the **Uyarılar** (Warnings) panel. These are content, not code: a designer deleting something, or two people merging, must not leave the team's editor unable to open. The data panel blocks deleting a row that is in use and changing its ID (`scene.editor.DataUsage`). Mismatches on the code side (components, fields and `@:choice` options) still stop the build.
 
-Görseli `entity.object` altında olmayan bileşen (sahne köküne bağlı birim gibi) `visuals()` döndürür. Seçim ve gizleme bu görselleri de kapsar.
+A component reports its quest links with `storyLinks()` (`scene.story.StoryLink`): it waits for or emits (event), reads or sets (variable), requires, gives or takes (item), starts (dialogue). The Warnings panel and the agent's `explain_quest` tool match these up. A component gives its display name with `title()`, its "Bileşen ekle" (Add component) group with `category()`, and its own rules for the Warnings panel with `issues()`. If `addable()` returns group names, the Inspector shows "+ Group" buttons under the component; the trigger returns `[TriggerCondition.CATEGORY, TriggerAction.CATEGORY]`.
 
-Oyunda görünmeyen şekiller `drawOverlay(overlay, selected)` içinde çizilir. Hazır biçimler `OverlayShapes` içindedir.
+A `@:choice` field must be a `String` and its default must be one of the options. If an option is removed from the code, any scene, prefab or prefab override that uses that value stops the build.
 
-## İşaretçi yazmak
+A component whose visuals are not under `entity.object` (such as a unit attached to the scene root) returns them from `visuals()`. Selection and hiding cover these visuals too.
 
-İşaretçi, oyunda görünmeyen ve editörde tıklanabilen bir bileşendir. `Marker`'dan türer, `ComponentRegistry` ile kaydedilir, `Düzen > İşaretçi ekle` menüsüne kendiliğinden girer:
+Shapes that are not visible in the game are drawn in `drawOverlay(overlay, selected)`. Ready-made shapes are in `OverlayShapes`.
+
+## Writing a marker
+
+A marker is a component that is invisible in the game and clickable in the editor. It extends `Marker`, is registered with `ComponentRegistry`, and appears in the `Düzen > İşaretçi ekle` (Edit > Add marker) menu by itself:
 
 ```haxe
 @:component("camp")
 class CampMarker extends Marker {
-  @:editable("Yarıçap", 1, 100) public var radius : Float = 8;
+  @:editable("Radius", 1, 100) public var radius : Float = 8;
 
   override public function color() : Int {
     return 0xE08040;
   }
 
   override public function title() : String {
-    return "Kamp";
+    return "Camp";
   }
 
   override function drawShape(overlay : Overlay, tint : Int, at : h3d.Vector) {
@@ -98,153 +100,153 @@ class CampMarker extends Marker {
   }
 
   override function onStart() {
-    // Oyun başlarken çalışır. Editörde çalışmaz.
+    // Runs when the game starts. Does not run in the editor.
   }
 }
 ```
 
-Rota için `RouteMarker`'dan türeyin ve `WaypointMarker`'ı da kaydedin. Noktalar alt nesnedir, `waypoints()` sırayla verir. `collider` bileşeni için `ColliderComponent` kaydedilir.
+For a route, extend `RouteMarker` and also register `WaypointMarker`. The points are child objects; `waypoints()` returns them in order. For the `collider` component, register `ColliderComponent`.
 
-Zeminin yüksekliğini bilen oyun `level.provide(GroundHeight, terrain)` çağırır, işaretçiler zemine oturur ve `z` zeminden yükseklik olur. Verilmezse `z` olduğu gibi kullanılır.
+A game that knows the ground height calls `level.provide(GroundHeight, terrain)`; markers then sit on the ground and `z` becomes the height above it. Without it, `z` is used as is.
 
-## Dünya
+## World
 
-Dünya isteğe bağlıdır. Tek sahneyle çalışan oyun bu bölümü atlar. Veri ve araçlar toolkit'tedir, çizim oyuna aittir: görsellik oyundan oyuna değişir.
+The world is optional. A game that works with a single scene skips this section. The data and the tools are in the toolkit; drawing belongs to the game, because the look changes from game to game.
 
 ```
-res/world/main.world.json      ızgara, arazi katmanları
-res/world/global.scene.json    hücreye bağlı olmayan nesneler
-res/world/environment.json     saat, güneş, sis
-res/world/c_3_2.scene.json     hücrenin nesneleri, sahneyle aynı biçim
-res/world/c_3_2.terrain.json   yükseklik ve boya
-res/world/c_3_2.scatter.json   dağıtılan nesneler
-res/world/c_3_2.nav.json       yol ağı
-res/world/c_3_2.terrain.mesh   arazi modelinin bu hücreye düşen parçası, ikili (LFS)
-res/world/textures/            arazi modellerinin dokuları
+res/world/main.world.json      grid, terrain layers
+res/world/global.scene.json    objects not tied to a cell
+res/world/environment.json     time of day, sun, fog
+res/world/c_3_2.scene.json     the cell's objects, same format as a scene
+res/world/c_3_2.terrain.json   height and paint
+res/world/c_3_2.scatter.json   scattered objects
+res/world/c_3_2.nav.json       navigation mesh
+res/world/c_3_2.terrain.mesh   the part of the terrain model that falls in this cell, binary (LFS)
+res/world/textures/            textures of the terrain models
 ```
 
-Bağlamak için:
+To hook it up:
 
-1. Oyun `WorldView` arayüzünü yazar: arazi ve dağıtma çizimi, dağıtma türleri, hava durumu hazır ayarları, ortamın uygulanması.
-2. Oyun `WorldData.read` ile `WorldState` kurar ve `state.view` verir.
-3. Editörde `state.loadAllTerrain()` ve `new Editor(level, "res/world/main.world.json", state)`.
-4. Oyunda `new CellStreamer(state, level, true)`, `start(x, y)` ve her karede `update(x, y)`.
-5. Derleme kontrolü için `common.hxml` içine `--macro scene.macro.SceneCheck.run("res/world")`.
+1. The game implements the `WorldView` interface: drawing terrain and scatter, scatter types, weather presets, applying the environment.
+2. The game builds a `WorldState` with `WorldData.read` and sets `state.view`.
+3. In the editor: `state.loadAllTerrain()` and `new Editor(level, "res/world/main.world.json", state)`.
+4. In the game: `new CellStreamer(state, level, true)`, `start(x, y)` and `update(x, y)` every frame.
+5. For the build check, add `--macro scene.macro.SceneCheck.run("res/world")` to `common.hxml`.
 
-Editörde yeni dünya oluşturma komutu yoktur, ilk `main.world.json` elle yazılır. Olmayan arazi dosyası düz arazi sayılır, ilk kayıtta oluşur.
+The editor has no command for creating a new world; the first `main.world.json` is written by hand. A missing terrain file counts as flat terrain and is created on the first save.
 
-Bileşenler iki yerden dünyaya katılır:
+Components take part in the world in two ways:
 
 ```haxe
-// Yol ağında yürünemeyen alan
+// An area of the navigation mesh that cannot be walked
 override public function navShapes() {
   return [NavShapes.box(entity.object.getAbsPos(), width, depth)];
 }
 
-// Hücresinden çıkıp oyuncunun yanına gelen şey hücreyle birlikte silinmesin
+// Something that left its cell and came near the player should not be removed with the cell
 override public function keepsCell(isNear : (Float, Float) -> Bool) {
   return Lambda.exists(units, unit -> isNear(unit.x, unit.y));
 }
 ```
 
-`CellStreamer` hücreyi `objectRadius` halkasında yükler, bir hücre dışına çıkınca boşaltır. Arazi `terrainRadius` halkasında kalır. Oyun sürerken gelen hücrelerde `onStart` da çalışır.
+`CellStreamer` loads cells within the `objectRadius` ring and unloads a cell once it is one cell outside. Terrain stays within the `terrainRadius` ring. `onStart` also runs for cells that arrive while the game is running.
 
-Arazi modeli `assets/terrain/` altındaki FBX'ten gelir. FBX `.editor/terrain/` altında HMD'ye çevrilir ve repoya girmez. Üçgenler ağırlık merkezine göre hücrelere bölünür, kesilmez. Yükseklik 2 metre aralıkla hücrenin `.terrain.json` dosyasına yazılır ve modelin dört köşesini kapladığı kareler `TerrainCell.COVERED` olur. Oyun bu karelerde kendi arazisini çizmez, parçayı `WorldView.terrainChanged` içinde `state.surfaces` üzerinden çizer. Yeniden uygulamada her hücre eskisiyle karşılaştırılır, yalnızca farklı olanlar komuta girer. `.gitattributes` içinde `*.mesh` LFS'te olmalıdır. Heaps FBX'i X ekseninde aynalar, model binalar gibi bu kurala uyar.
+The terrain model comes from an FBX under `assets/terrain/`. The FBX is converted to HMD under `.editor/terrain/` and does not go into the repository. Triangles are split into cells by their centroid and are not cut. Height is written at a 2 metre spacing into the cell's `.terrain.json`, and squares whose four corners the model covers become `TerrainCell.COVERED`. The game does not draw its own terrain on these squares; it draws the part through `state.surfaces` in `WorldView.terrainChanged`. When the model is applied again, each cell is compared with the old one and only the cells that differ go into the command. `*.mesh` must be in LFS in `.gitattributes`. Heaps mirrors FBX on the X axis; the model follows this rule like buildings do.
 
-Yol bulma `NavWorld.findPath` ile yapılır. Hücre başına düğüm ızgarasıdır, saf Haxe'dir, yerel kütüphane gerektirmez. Hücreler ilk gerektiğinde okunur, yol ağı olmayan hücre yürünebilir sayılır. Recast'e geçilirse `NavWorld` ve `NavBaker` değişir, bileşenler etkilenmez.
+Pathfinding is done with `NavWorld.findPath`. It is a node grid per cell, pure Haxe, and needs no native library. Cells are read the first time they are needed; a cell without a navigation mesh counts as walkable. If we move to Recast, `NavWorld` and `NavBaker` change and components are not affected.
 
-## Görevler ve diyaloglar
+## Quests and dialogues
 
-`scene.story` paketidir. Oyun `Story` kurar ve `level.provide(Story, story)` ile verir; oyun durumu (`GameState`: eşya, değişken, fraksiyon ilişkisi), açık diyalog ve adlı olaylar oradadır.
+This is the `scene.story` package. The game builds a `Story` and provides it with `level.provide(Story, story)`; the game state (`GameState`: items, variables, faction relations), the open dialogue and named events live there.
 
-- Koşul `TriggerCondition`'dan, eylem `TriggerAction`'dan türeyen bileşendir. Tetikleyici nesnesine eklenir, `story.fire(entity)` bütün koşullar sağlanırsa eylemleri bileşen sırasıyla çalıştırır.
-- Diyalog `Dialog` biçimindedir, `DialogRunner` oynatır. Olay düğümü `story.emit(ad)` çağırır, `story.listen(ad, entity)` ile bekleyen tetikleyici çalışır. Eşya ve değişken işleri böylece tek yerde, eylemlerde kalır.
-- Diyalog kutusunun çizimi oyuna aittir: `story.dialog` okunur, `next()` ve `choose(i)` çağrılır.
-- Editörde diyalog `scene.editor.DialogWorkspace` ile sahne görünümünün yerinde düzenlenir, seçili düğüm Inspector'da açılır. Alt paneldeki `DialogPanel` yalnızca listedir.
-- Düğüm konumları dosyada ekran netliğinden bağımsız birimdedir, tuvale `interfaceScale` ile çarpılarak verilir. Yerleştir `scene.story.DialogLayout` ile ekranda ölçülen boydan değil içerikten hesaplanır: Retina Mac ile Windows aynı dosyayı üretir.
-- "Tetikleyici ekle" kayıtlı bileşenlerden bulunur: `addable()` içinde eylem grubu olan yerleştirilebilir işaretçi ve `@:dialog` alanlı bir `TriggerAction`. İkisi yoksa düğme görünmez.
-- Oyun `editor.dialogs.itemTable` ile eşya tablosunu söylerse koşul düğümünde eşya listeden seçilir ve satır silinirken diyaloglar da taranır.
+- A condition is a component that extends `TriggerCondition`, an action one that extends `TriggerAction`. They are added to a trigger object; `story.fire(entity)` runs the actions in component order if all conditions hold.
+- A dialogue is in the `Dialog` format and is played by `DialogRunner`. An event node calls `story.emit(name)`, and a trigger waiting with `story.listen(name, entity)` runs. This keeps item and variable logic in one place, in the actions.
+- Drawing the dialogue box belongs to the game: read `story.dialog`, call `next()` and `choose(i)`.
+- In the editor a dialogue is edited in place of the scene view with `scene.editor.DialogWorkspace`; the selected node opens in the Inspector. `DialogPanel` in the bottom panel is only a list.
+- Node positions are stored in units independent of screen density and are multiplied by `interfaceScale` for the canvas. Auto layout (`scene.story.DialogLayout`) works from the content, not from sizes measured on screen: a Retina Mac and Windows produce the same file.
+- "Tetikleyici ekle" (Add trigger) is found from the registered components: a placeable marker with an action group in `addable()`, and a `TriggerAction` with a `@:dialog` field. If either is missing, the button is hidden.
+- If the game names the item table with `editor.dialogs.itemTable`, items are picked from a list in condition nodes, and dialogues are also scanned when a row is deleted.
 
-Oyun verisi `scene.data.DataTable` ve `GameData` ile okunur. Her tablo `res/data/<ad>.table.json` dosyasıdır.
+Game data is read with `scene.data.DataTable` and `GameData`. Each table is a `res/data/<name>.table.json` file.
 
-## Dosya güvenliği
+## File safety
 
-Editör dosyayı hiç kör yazmaz (`DiskGuard`, `StoreGuard`):
-- Kaydetmeden önce diski yeniden okur. Dosya dışarıda değiştiyse `scene.data.ThreeWay` ile üç yönlü birleştirir: sahnede nesne, tabloda satır, diyalogda düğüm düzeyinde.
-- Aynı birim iki tarafta da farklı değiştiyse dosyayı yazmaz. İki hali `.editor/catismalar/` altına yedekler, Uyarılar panelinde seçtirir.
-- Açık dosyaları saniyede bir yoklar. Temiz olanı yeniden yükler ve o dosyanın geri alma adımlarını `CommandStack.forget` ile düşürür.
+The editor never writes a file blindly (`DiskGuard`, `StoreGuard`):
+- Before saving it reads the disk again. If the file changed outside, it does a three-way merge with `scene.data.ThreeWay`: per object in a scene, per row in a table, per node in a dialogue.
+- If the same unit changed differently on both sides, it does not write the file. It backs up both versions under `.editor/catismalar/` (conflicts) and lets you choose in the Warnings panel.
+- It polls open files once a second. It reloads a clean one and drops that file's undo steps with `CommandStack.forget`.
 
-Yeni bir dosya türü yazan kod bu yoldan geçmelidir.
+Code that writes a new kind of file must go through this path.
 
-## Ajan sunucusu
+## Agent server
 
-`scene.editor.agent.AgentServer`, editör açılınca `127.0.0.1:8890`'da MCP (HTTP) sunucusu açar. Soket her karede yoklanır, araçlar ana döngüde çalışır. Bir araçtaki hata editörü düşürmez, ajana hata olarak döner. `Origin` başlıklı ve başka `Host`'lu istekler reddedilir.
+`scene.editor.agent.AgentServer` opens an MCP (HTTP) server on `127.0.0.1:8890` when the editor starts. The socket is polled every frame and tools run on the main loop. An error in a tool does not bring the editor down; it goes back to the agent as an error. Requests with an `Origin` header or another `Host` are rejected.
 
-`ContextTools` salt okunur bağlam araçlarını ve istemleri (`addPrompt`) kaydeder. `PlayTools` oyun gözünü, `EditTools` yazma araçlarını, `ExamTools` ajan sınavını (`tests/ajan-sinavi/*.sinav.json`) kaydeder. Oyun kendi araçlarını `editor.agent.add` ile ekler; başka bir aracı `callTool` ile çağırabilir. `AgentPanel` son çağrıları gösterir (`agent.log`).
+`ContextTools` registers read-only context tools and prompts (`addPrompt`). `PlayTools` registers the game view, `EditTools` the write tools, and `ExamTools` the agent exam (`tests/ajan-sinavi/*.sinav.json`). The game adds its own tools with `editor.agent.add` and can call another tool with `callTool`. `AgentPanel` shows the latest calls (`agent.log`).
 
-**Model içe aktarma:** `AssetImporter` FBX'i HMD'ye çevirmeden önce `FbxCurves.sync` ile animasyon eğrilerini eşitler. Heaps bir düğümün X, Y, Z eğrilerini ilk eğrinin anahtar zamanlarıyla okur, eksen eksen azaltılmış anahtarlar sıfıra düşerdi. Ayarlar kaynağın yanındaki `<ad>.aktarim.json` dosyasındadır (`ImportSettings`: `trim`, `clips`, `sockets`, `joints`, `length`, `grip`, `blender`). Klasördeki `klasor.aktarim.json` alt klasörlerdeki bütün modellere uygulanır (`ImportSettings.effective`); modelin kendi dosyası aynı adlı klibi, noktayı ve alanı ezer, kırpma yalnızca modelin kendisinden gelir.
-- `BlenderConverter` GLB, glTF ve OBJ'yi (ayarda `blender: true` ise FBX'i de) başsız Blender'la FBX'e çevirir (`tools/blender_fbx.py`: `FBX_SCALE_UNITS`, gömülü dokular, her karede anahtar). Çıktı `.editor/donusum/` altında, kaynak ya da betik değişince yenilenir. Blender `BLENDER` ortam değişkeninden ya da Mac ve Windows'un bilinen kurulum yerlerinden bulunur.
-- `scene.JointNames` (runtime) eklem adlarını standart adlara eşler: Mixamo, `mixamorig:` öneki, Rigify (`DEF-`, `ORG-`). İçe aktarma eşlemeyi `<ad>.model.json`'un `joints` alanına yazar; oyun aynı eşlemeyle arar, yeni iskelet için kod değişmez.
-- Çok klipli FBX: klip satırının `take` alanı dosyadaki klibin adıdır (sonundan eşleşir); `source` boşsa klip modelin kendi dosyasındandır.
-- `skins` kaplamalar için kaynağa göre bir kalıptır (`textures/{ad}_skin*.png`); uyan dokular modelin yanına kopyalanır, adları `<ad>.model.json`'un `skins` alanına yazılır. Çalışma zamanında `ModelLibrary.texture(path)` dokuyu verir.
-- İskeletsiz modelde `length` en uzun kenarı metreye ölçekler (`RigidModel.scaleTo`), `grip: true` tutamak noktasını köşelerden tahmin eder (`GripEstimate`: temel eksen, ince uç sap, X başın en geniş yönü).
-- `ModelTrim` kutularla üçgen kırpar. Üçgen tek noktaya indirilir, köşe ve deri verisi bozulmaz.
-- `ModelClips` başka FBX'lerin kliplerini HMD'ye ekler, rigin dinlenme pozuna yeniden hedefler (`retarget`) ve adım hızını ölçer.
-  - Klipler ayrı bir `HMDOut` ile okunur; `leftHandConvert()` `loadAnimation()`'dan önce çağrılmalı, yoksa dönüşler aynalanmaz ve kollar yer değiştirir.
-  - Klip satırında `arms` verilirse kol eklemleri (köprücükten ele) o klibin ilk karesinde sabit kalır (`holdArms`): kütüphanede olmayan silahlı klipler böyle türetilir.
-- Takma noktaları (`ImportSettings.sockets`) `<ad>.model.json`'a yazılır; iskeletli modelde ayar yoksa standart eklemlere (eşlemeyle) varsayılanlar (avuç ele bağlı köşelerden). Eksen bağlama pozundaki gövdeye göre, yönü `socketFrame`. İskeletsiz modelde yalnızca noktalar yazılır.
-- Veri tablolarında `varlik` türü: `res/` altındaki dosya yolu. `GameData.forget` tablo değişince önbelleği bırakır.
-- `Editor.requestRender` çizim karesinin içinde bir kez ekran dışı çizim yaptırır (oyunun ajan önizlemesi bununla çizer).
-- Kayıt (`scene.save`, oyunun kullandığı genel parçalar; ne saklanacağına oyun karar verir):
-  - `Saveable`: bileşen farkını verir ve geri yükler.
-  - `WorldDelta`: kapanan hücrelerin farkı. `SceneInstance.delta` atanınca `destroyEntity` farkı alır, `stream` ve `start` `onStart`'tan önce geri yükler.
-  - `SaveFile`: bölümlü, sıkıştırılmış, CRC32'li dosya; güvenli yazma ve yedek.
-  - `SaveSlots`: seferler ve yuvalar.
-  - `PlayOptions.save` (`--save`), `CellStreamer.restart`, `GameState.watch` ve `restore`.
-  - `Random`: tohumlu üretici, `hxd.Rand`'ın birebir kopyası (Heaps güncellemesi tohumdan çıkan sayıları değiştiremez; testte altın değerlerle kilitli). Kodda `Math.random`, `Std.random`, `hxd.Rand` yasak, bekçi test tarar. `RandomStreams`: seferin tohumundan adlı, kaydedilebilir akışlar.
-  - Oyunda yok etmek `SceneInstance.removeEntity` (fark kaydına "silindi"; hücre açılınca kurulmaz), oyunda kurmak `spawnEntities(veri, hücre, sahip)` (tam veri kayda girer, hücreyle açılıp kapanır). `destroyEntity` hücre kapanışı içindir, kayda "silindi" yazmaz. Kimlik `WorldDelta.newId(akış)`.
-  - Kayıttan oyna: `SaveInspector` (oyun kayıt listesini ve raporu verir), `panels/SavesWindow` (Oyun > Kayıttan oyna…), `Editor.playFromSave`, görev testinin `save` alanı (`--save` ile açılan oyun). Sınav görevinde `files` (görev dosyalarını yerine koyar, sonunda kaldırır) ve `quest_test` için `save: true`.
-  - Donmasız kayıt: `SaveFile.pack` / `encodePacked` (sıkıştırılmış bölümler), `DeltaSections` (hücre bölümleri önbellekte; `WorldDelta.touch`/`takeDirty` değişen hücreleri izler, yalnızca onlar yeniden kodlanır), `SaveWriter` (arka planda iş parçacığı: sırayla yazma, `later` bölümleri orada hazırlanır, `poll`/`flush`). `SaveSlots.AUTO_COUNT` 5.
-  - Optimizasyon motoru (`scene.tune`, oyunun planı `docs/OPTIMIZASYON_PLANI.md`): `TuneModule` (ayarlar, kilitli ayarlar, ölçütler `Max`/`Min`/`Band`/`Limit`, senaryo, eğitim ve doğrulama tohumları, kaynak `sentetik`/`iz`), `Tuner` (kaba kuvvet ya da rastgele örnekleme ve yerel iyileştirme, önbellek, doğrulamada da sert sınırı tutan seçim, kalite-performans sınırı), `TuneReport` (Markdown rapor).
-  - Sürümler: `Migrations` (biçim göçleri sırayla; oyun adımları ekler), `ContentPrint` (hücre dosyalarının ve tabloların CRC32 izi, `diff` kayıttan sonra değişenleri verir), `WorldIndex` (tasarlanmış bütün nesneler, prefab içleri açılmış; yetim fark ve yerine geçen adayı için).
-  - Sıfırlamadan sağ çıkanlar: `WorldDelta.isPlayerOwned` (bileşen durumunda `owner: "oyuncu"` ya da oyuncunun kurduğu) ve `isStory` (durumda `story: true`, hikâye ilerlemesi: çalışmış tetikleyici). `forgetCell` (bölge sıfırlama) bunları korur, `importPart` (Import) yalnızca bunları taşır.
-  - `WorldDelta.remap`: kimlik eşlemesi. Editörde `ReleaseIds` yayın listesini yazar, kaybolan yayın nesnesini uyarır, yerine geçeni önerir ve `kayit_esleri` tablosuna eşler. Yayın listesi yalnızca büyür; eşlemeler zincirlenir (`ReleaseIds.resolve`, `WorldDelta.remap`), bilerek kaldırılan nesne bırakılır (`birak` sütunu). `Issue.actions` uyarının yanında düğmeler çizer.
-  - Yeniden hedefleme: her eklem için rig dünya = rig dinlenme × klip dinlenmesi⁻¹ × klip dünya. Kemik boyları rigden alınır.
-  - Klibin iskeleti bir okuyucudan, kareleri ayrı bir okuyucudan gelir. Heaps `loadAnimation`'ı aynı okuyucuda ikinci kez çağırınca açıları yeniden radyana çevirir.
-  - Kareler `HMDOut.makeAnimation` ile yazılır.
-- İskeletli modelin yanına `<ad>.model.json` yazılır: boy, kalçanın yeri ve klip hızları metre cinsinden, bakış yönü (yürürken yere basan ayağın tersi).
-- Ayar dosyası veya bir klibin kaynağı HMD'den yeniyse model yeniden alınacaklar listesine girer.
-- Çalışma zamanında `ModelLibrary.animation(path, name)` adlı klibi önbellekten verir.
-- İçe aktarma, yazdığı modeli `ModelLibrary`'den düşürür ve `AssetWatch.changed` ile dinleyicileri hemen haberdar eder. Önbellekte kalan eski başlık yeni dosyayı yanlış okur; deride boş erişim olur.
-- Ajan araçları: `model_info` (sınırlar, eklemler, eklem eşlemesi, dosyadaki klip adları, klipler, karakter bilgisi, etkin ayar, taban haritası) ve `import_model`'in `trim`, `clips` (`take` ile), `sockets`, `joints`, `length`, `grip`, `blender` ve `folder` (klasör ayarına yazar) alanları. Yazma araçları editör komutlarını kullanır ve çağrıyı tek adım olarak geçmişe yazar (`CommandStack.record`). Hata olursa uygulanan komutlar geri alınır. Ekran görüntüsü için oyunun `Main.render`'ı `super.render(e)`'den sonra `editor.afterRender(e)` çağırmalıdır, şablon bunu yapar. Oyun kendi aracını `editor.agent.add({name, description, schema, readOnly, run})` ile ekler. `run` bir nesne döndürür: `{value}` JSON olarak, `{text}` düz metin olarak, `{png}` görüntü olarak gider. Projenin `.mcp.json`'u ve `.claude/settings.json`'u şablonda `mcp.json` ve `claude-settings.json` adlarıyla durur, `new-project.sh` yerine koyar. `settings.json`'daki `PostToolUse` hook'u `tools/agent-hook.sh`'ı çalıştırır. Betik, editörün iki saniyede bir yazdığı `.editor/ajan-durum.json`'a bakar. Editör kapalıysa sessiz kalır, sunucuya hiç bağlanmaz; bu yüzden editör kapalıyken hata mesajı çıkmaz.
+**Model import:** Before converting an FBX to HMD, `AssetImporter` aligns the animation curves with `FbxCurves.sync`. Heaps reads a node's X, Y and Z curves at the key times of the first curve, so keys reduced axis by axis fell to zero. Settings live next to the source in `<name>.aktarim.json` (`ImportSettings`: `trim`, `clips`, `sockets`, `joints`, `length`, `grip`, `blender`). A `klasor.aktarim.json` in a folder applies to every model in its subfolders (`ImportSettings.effective`); the model's own file overrides the clip, socket and field of the same name, and trimming only comes from the model itself.
+- `BlenderConverter` converts GLB, glTF and OBJ (and FBX too if the setting has `blender: true`) to FBX with headless Blender (`tools/blender_fbx.py`: `FBX_SCALE_UNITS`, embedded textures, a key on every frame). The output goes under `.editor/donusum/` and is refreshed when the source or the script changes. Blender is found from the `BLENDER` environment variable or from the known install locations on Mac and Windows.
+- `scene.JointNames` (runtime) maps joint names to standard names: Mixamo, the `mixamorig:` prefix, Rigify (`DEF-`, `ORG-`). Import writes the mapping into the `joints` field of `<name>.model.json`; the game looks joints up with the same mapping, so a new skeleton needs no code change.
+- Multi-clip FBX: a clip row's `take` field is the clip's name in the file (matched from the end); if `source` is empty, the clip comes from the model's own file.
+- `skins` is a pattern relative to the source for alternative textures (`textures/{name}_skin*.png`); matching textures are copied next to the model and their names are written into the `skins` field of `<name>.model.json`. At runtime `ModelLibrary.texture(path)` returns the texture.
+- For a model without a skeleton, `length` scales the longest side to metres (`RigidModel.scaleTo`), and `grip: true` estimates the grip point from the vertices (`GripEstimate`: main axis, the thin end is the handle, X is the head's widest direction).
+- `ModelTrim` trims triangles with boxes. A triangle is collapsed to a single point, so vertex and skin data stay intact.
+- `ModelClips` adds clips from other FBX files to the HMD, retargets them to the rig's rest pose (`retarget`) and measures the stride speed.
+  - Clips are read with a separate `HMDOut`; `leftHandConvert()` must be called before `loadAnimation()`, otherwise rotations are not mirrored and the arms swap places.
+  - If a clip row has `arms`, the arm joints (from the collarbone to the hand) stay fixed at that clip's first frame (`holdArms`): this is how armed clips missing from the library are derived.
+- Sockets (`ImportSettings.sockets`) are written into `<name>.model.json`; for a model with a skeleton and no setting, defaults are placed on the standard joints (through the mapping; the palm from the vertices bound to the hand). The axis follows the body in the bind pose, and its direction is `socketFrame`. For a model without a skeleton, only the points are written.
+- In data tables, the `varlik` (asset) type is a file path under `res/`. `GameData.forget` drops the cache when a table changes.
+- `Editor.requestRender` performs one off-screen render inside the drawing frame (the game's agent preview draws with this).
+- Saving (`scene.save`, general parts the game uses; the game decides what to store):
+  - `Saveable`: returns a component's difference and restores it.
+  - `WorldDelta`: the differences of closed cells. Once `SceneInstance.delta` is set, `destroyEntity` takes the difference, and `stream` and `start` restore it before `onStart`.
+  - `SaveFile`: a sectioned, compressed file with CRC32; safe writing and a backup.
+  - `SaveSlots`: campaigns and slots.
+  - `PlayOptions.save` (`--save`), `CellStreamer.restart`, `GameState.watch` and `restore`.
+  - `Random`: a seeded generator, an exact copy of `hxd.Rand` (a Heaps update cannot change the numbers that come out of a seed; locked with golden values in the tests). `Math.random`, `Std.random` and `hxd.Rand` are banned in code, and a guard test scans for them. `RandomStreams`: named, saveable streams from the campaign's seed.
+  - To destroy in the game, use `SceneInstance.removeEntity` (recorded as "removed" in the difference; not built when the cell opens). To build in the game, use `spawnEntities(data, cell, owner)` (the full data goes into the save and opens and closes with the cell). `destroyEntity` is for closing a cell and does not record "removed". IDs come from `WorldDelta.newId(stream)`.
+  - Play from save: `SaveInspector` (the game provides the save list and the report), `panels/SavesWindow` (`Oyun > Kayıttan oyna…`, Game > Play from save…), `Editor.playFromSave`, and the quest test's `save` field (a game opened with `--save`). In an exam task, `files` (puts the task's files in place and removes them at the end) and `save: true` for `quest_test`.
+  - Saving without a freeze: `SaveFile.pack` / `encodePacked` (compressed sections), `DeltaSections` (cell sections are cached; `WorldDelta.touch`/`takeDirty` track changed cells and only those are encoded again), `SaveWriter` (a background thread: writes in order, prepares `later` sections there, `poll`/`flush`). `SaveSlots.AUTO_COUNT` is 5.
+  - Optimization engine (`scene.tune`; the game's plan is `docs/OPTIMIZASYON_PLANI.md`): `TuneModule` (tunables, locked tunables, metrics `Max`/`Min`/`Band`/`Limit`, scenario, training and validation seeds, source `sentetik` (synthetic) or `iz` (traces)), `Tuner` (brute force, or random sampling and local improvement; a cache; a choice that also keeps hard limits on validation; the quality–performance frontier), `TuneReport` (Markdown report).
+  - Versions: `Migrations` (format migrations in order; the game adds steps), `ContentPrint` (CRC32 fingerprint of cell files and tables; `diff` returns what changed after the save), `WorldIndex` (every designed object, with prefab contents expanded; for orphaned differences and their replacement candidates).
+  - What survives a reset: `WorldDelta.isPlayerOwned` (`owner: "oyuncu"` (player) in the component state, or built by the player) and `isStory` (`story: true` in the state, story progress such as a trigger that has run). `forgetCell` (region reset) keeps these, and `importPart` (Import) moves only these.
+  - `WorldDelta.remap`: ID mapping. In the editor, `ReleaseIds` writes the release list, warns about a release object that has gone missing, suggests the one that replaced it and maps it into the `kayit_esleri` table. The release list only grows; mappings chain (`ReleaseIds.resolve`, `WorldDelta.remap`), and an object removed on purpose is let go (the `birak` column). `Issue.actions` draws buttons next to a warning.
+  - Retargeting: for each joint, rig world = rig rest × clip rest⁻¹ × clip world. Bone lengths come from the rig.
+  - A clip's skeleton comes from one reader and its frames from a separate reader. If Heaps calls `loadAnimation` a second time on the same reader, it converts the angles to radians again.
+  - Frames are written with `HMDOut.makeAnimation`.
+- For a model with a skeleton, `<name>.model.json` is written next to it: height, hip position and clip speeds in metres, and the facing direction (opposite to the foot that is on the ground while walking).
+- If the settings file or a clip's source is newer than the HMD, the model goes on the list to be imported again.
+- At runtime `ModelLibrary.animation(path, name)` returns the named clip from the cache.
+- Import drops the model it wrote from `ModelLibrary` and notifies listeners at once with `AssetWatch.changed`. An old header left in the cache reads the new file wrongly, causing a null access in the skin.
+- Agent tools: `model_info` (bounds, joints, joint mapping, clip names in the file, clips, character info, effective settings, floor map), and the `trim`, `clips` (with `take`), `sockets`, `joints`, `length`, `grip`, `blender` and `folder` (writes the folder setting) fields of `import_model`. Write tools use editor commands and record the call as a single history step (`CommandStack.record`). On an error, the commands already applied are undone. For screenshots, the game's `Main.render` must call `editor.afterRender(e)` after `super.render(e)`; the template does this. The game adds its own tool with `editor.agent.add({name, description, schema, readOnly, run})`. `run` returns an object: `{value}` goes as JSON, `{text}` as plain text, `{png}` as an image. The project's `.mcp.json` and `.claude/settings.json` sit in the template as `mcp.json` and `claude-settings.json`, and `new-project.sh` puts them in place. The `PostToolUse` hook in `settings.json` runs `tools/agent-hook.sh`. The script reads `.editor/ajan-durum.json` (agent status), which the editor writes every two seconds. If the editor is closed, it stays silent and never connects to the server, so no error message appears while the editor is closed.
 
-## Oyun gözü ve görev testleri
+## Game view and quest tests
 
-Editör F5 veya görev testi için oyunu `--play` ile ayrı süreçte açar. Haberleşme dosyayladır (`scene.PlayFiles`):
-- Oyun durumunu `bin/ajan/oyun-durumu.json`'a, hikâye izini `bin/ajan/oyun-izi.jsonl`'a yazar.
-- Görev testinde editör `bin/ajan/senaryo.json`'u yazar. Oyun onu okur, oynar, `bin/ajan/sonuc.json`'u yazıp kapanır.
+For F5 or a quest test, the editor opens the game in a separate process with `--play`. They communicate through files (`scene.PlayFiles`):
+- The game writes its state to `bin/ajan/oyun-durumu.json` (game state) and the story trace to `bin/ajan/oyun-izi.jsonl` (game trace).
+- In a quest test the editor writes `bin/ajan/senaryo.json` (scenario). The game reads it, plays it, writes `bin/ajan/sonuc.json` (result) and closes.
 
-İz için oyun `story.log = new scene.story.StoryLog()` verir; Story ve `DialogRunner` adımları kendisi kaydeder.
+For the trace, the game sets `story.log = new scene.story.StoryLog()`; Story and `DialogRunner` record their own steps.
 
-Durumu yazan köprü ve test adımlarını oynayan çalıştırıcı oyuna aittir, çünkü ekip ve birim oyunun kendi türleridir. Bu oyunda `src/agent/PlayBridge.hx` ve `QuestTestRunner.hx`'te durur. Başka bir oyun aynı dosyaları yazdığı sürece editör ve ajan araçları değişmeden çalışır. Görev testleri `res/tests/*.test.json`'dadır, biçim kılavuzda.
+The bridge that writes the state and the runner that plays the test steps belong to the game, because the squad and units are the game's own types. In our game they are in `src/agent/PlayBridge.hx` and `QuestTestRunner.hx`. As long as another game writes the same files, the editor and the agent tools work unchanged. Quest tests are in `res/tests/*.test.json`; the format is in the game's editor guide.
 
 ## Prefab
 
-Prefab dosyası `res/prefabs/ad.prefab.json`, tek köklü küçük bir sahnedir. Sahne yalnızca kök satırını tutar: `prefab` yolu ve `overrides` listesi. Alt nesneler yüklenirken açılır, kimlikleri `kök/parça` biçimindedir. Farklar elle izlenmez, kayıtta prefab'la karşılaştırılarak bulunur.
+A prefab file is `res/prefabs/name.prefab.json`, a small scene with a single root. The scene keeps only the root row: the `prefab` path and the `overrides` list. Children are expanded on load, and their IDs have the form `root/part`. Differences are not tracked by hand; they are found on save by comparing with the prefab.
 
-Oyun, sahneyi yüklemeden önce dosya okuyucuyu verir:
+Before loading the scene, the game provides the file reader:
 
 ```haxe
 level.prefabLoader = path -> hxd.Res.load(path).toText();
 ```
 
-Derleme kontrolü için `common.hxml` içine `--macro scene.macro.SceneCheck.run("res/prefabs")` eklenir. Artık kodda olmayan bir alanı gösteren fark derlemeyi durdurur. Eksik prefab dosyası ve iki köklü prefab ise içeriktir: derleme uyarı verir, durmaz, `push.sh` uyarıyı onaydan önce gösterir. Açılamayan prefab sahneyi düşürmez: editörde kök nesne yolu ve farklarıyla korunur, oyunda boş nesne olarak kurulur ve `Sahne uyarısı` yazılır.
+For the build check, add `--macro scene.macro.SceneCheck.run("res/prefabs")` to `common.hxml`. An override pointing to a field that is no longer in the code stops the build. A missing prefab file or a prefab with two roots is content: the build warns and does not stop, and `push.sh` shows the warning before asking for confirmation. A prefab that cannot be opened does not break the scene: in the editor the root keeps its path and overrides, in the game it is built as an empty object and a `Sahne uyarısı` (scene warning) is written.
 
-## Yeniden adlandırma
+## Renaming
 
-Dosyada sınıf adı değil `@:component` kimliği saklanır, bu yüzden sınıfı taşımak veya yeniden adlandırmak sahneleri etkilemez.
+The file stores the `@:component` ID, not the class name, so moving or renaming the class does not affect scenes.
 
-Kimlik veya `@:editable` alan adı değişirse eskisi bildirilir. Sahneler eski adla açılır, ilk kayıtta yeni ada geçer:
+If an ID or an `@:editable` field name changes, the old one is declared. Scenes open with the old name and switch to the new one on the first save:
 
 ```haxe
 @:component("house")
@@ -254,86 +256,97 @@ class HouseComponent extends Component {
 }
 ```
 
-Bildirim unutulursa derleme durur ve hangi sahnede hangi nesnenin etkilendiğini söyler. Bunun için oyunun derleme ayarında şu satır olmalıdır:
+If the declaration is forgotten, the build stops and says which object in which scene is affected. For this, the game's build settings must have this line:
 
 ```
 --macro scene.macro.SceneCheck.run("res/scenes")
 ```
 
-Bir bileşen veya alan bilerek silindiyse sahne dosyası da güncellenir.
+If a component or field was removed on purpose, the scene file is updated too.
 
-`@:choice` seçeneklerinin eski ad bildirimi yoktur. Seçenek silinir veya yeniden adlandırılırsa derleme durur, `res/scenes/` ve `res/prefabs/` altındaki değerler aynı commit'te değiştirilir.
+`@:choice` options have no former-name declaration. If an option is removed or renamed, the build stops; change the values under `res/scenes/` and `res/prefabs/` in the same commit.
 
-## Sahne dosyası
+## Scene file
 
-JSON'dur ve deterministik yazılır: aynı sahne her sistemde aynı dosyayı üretir. Sayılar 5 ondalığa yuvarlanır, dönüşler derecedir, alanlar alfabetik sıralıdır. Bu derlemede tanınmayan bileşen ve alanlar silinmez, olduğu gibi geri yazılır.
+It is JSON and is written deterministically: the same scene produces the same file on every system. Numbers are rounded to 5 decimals, rotations are in degrees, and fields are sorted alphabetically. Components and fields this build does not recognize are not deleted; they are written back as they were.
 
-Prefab kopyasının satırında `prefab` ve `overrides` bulunur, kopya olmayan nesnelerde bu alanlar yazılmaz.
+A prefab instance's row has `prefab` and `overrides`; these fields are not written for objects that are not instances.
 
-Biçim değişirse `SceneFormat.VERSION` artırılır ve `MIGRATIONS` listesine yükseltme eklenir.
+If the format changes, `SceneFormat.VERSION` is raised and an upgrade is added to the `MIGRATIONS` list.
 
-## Oyunu editöre bağlama
+## Hooking the game up to the editor
 
-Şablondaki `Main.hx` hazır örnektir. Oyuna özel her şey başlangıçta kaydedilir:
+The template's `Main.hx` is a ready example. Everything specific to the game is registered at startup:
 
 ```haxe
 editor = new Editor(level, "res/" + MAIN_SCENE);
-editor.actions.groundRay = ray -> terrain.raycast(ray);        // Verilmezse z = 0 düzlemi
-editor.actions.addAssetType("fbx", "model", "path");           // Sürüklenen dosya hangi bileşene yazılır
-editor.validator.rules.push(scene -> myIssues(scene));         // Kayıtta çalışan oyun kuralı
-editor.addPanel("Fraksiyonlar", drawFactions);                 // Oyuna özel panel
+editor.actions.groundRay = ray -> terrain.raycast(ray);        // Without it, the z = 0 plane
+editor.actions.addAssetType("fbx", "model", "path");           // Which component a dragged file is written to
+editor.validator.rules.push(scene -> myIssues(scene));         // A game rule that runs on save
+editor.addPanel("Factions", drawFactions);                     // A game-specific panel
 ```
 
-- `Main.render` içinde `editor.render(e)` çağrılır, model önizlemeleri orada çizilir.
-- Kare koruması (`scene.editor.FrameGuard`): editörde bir kare yarıda kalınca Dear ImGui sonraki `NewFrame`'de uygulamayı durdurur (assert, abort) ve kaydedilmemiş iş gider. Uygulama dört yer bağlar, şablondaki `Main.hx` örnektir:
-  - `init` içinde `FrameGuard.install()`: Heaps'in hata bildirimi sarılır, hata metni saklanır.
-  - `mainLoop` başında `FrameGuard.beforeFrame()`, sonuç `editor.frameFailed`'e verilir: önceki kare yarıda kaldıysa ImGui toparlanır.
-  - `update` gövdesi `FrameGuard.run` ile, hata `editor.failed`'e verilir.
-  - `render` içinde sahne çizimi `try` içinde, hata `editor.renderFailed`'e verilir: çizim hedefleri bırakılır, ImGui arayüzü yine çizilir.
-  - Editör kendi bölümlerini ve her paneli `FrameGuard.run` ile çizer. Hata veren panel "Yeniden dene"ye kadar durur. Hata bildirimde, Uyarılar panelinde, günlükte ve ajanın `get_warnings` aracında görünür; sahnenin yedeği hemen alınır (`SceneDocument.backupNow`, en çok 10 saniyede bir).
-  - Yerel tarafı `editor/native/imgui_guard.cpp`, hlimgui eklentisine derlenir. Üçüncü taraf hlimgui'ye dokunulmaz: Mac'te `tools/build-hlimgui.sh` kaynak listesine ekler, Windows'ta `tools/hlimgui/CMakeLists.txt` sarmalayıcısı aynı hedefe ekler.
-  - Eklenti değişince `tools/hlimgui-surum.txt` artar. Derleme betikleri damgayı hdll'in yanına yazar; `run.sh editor` ve `run.bat editor` eski hdll'i tanıyıp yeniden derlemeyi söyler. Eski hdll'de yeni yerel işlevler yoktur; HashLink bunu açılışta anlaşılmaz bir hatayla bildirirdi.
-- Editör ikilisi `--play <sahne> --camera x y z x y z` ile oyun olarak açılır, `PlayOptions.parse(Sys.args())` bunu okur. "Buradan oyna" bunu kullanır, çünkü oyun derlemesi kaynakları gömülü taşır ve yeni kaydedilen sahneyi görmez.
-- Kişiye özel ayarlar `.editor/` altındadır ve git'e girmez: son açılanlar, editörde gizlenenler, otomatik yedekler.
-- Görünürlük iki ayrı durumdur. `entity.active` sahneye yazılır ve oyunu etkiler, `entity.hiddenInEditor` yalnızca o bilgisayarda geçerlidir. İkisi bağımsızdır: oyunda kapalı nesne editörde düzenlenebilir kalır.
-- İçe aktarma `assets/` altındaki modeli (FBX; GLB, glTF ve OBJ Blender'la çevrilerek) `res/models/` altına HMD olarak yazar; `assets/models/mock/` altındakiler `res/models/mock/` altına. Editör arayüzü olmadan da çağrılır: `new AssetImporter().run(kaynak)`. Oyun derlemesi FBX'i makro içinde dönüştürür ve normal map'li modelde `meshTools` ister, HMD'de bu adım yoktur. Yeni oyunun `.gitattributes` dosyasında `*.hmd` LFS'te olmalıdır.
-- Heaps'in normal map ve specular gölgelendiricisi UV'yi temel renk dokusundan alır. Temel dokusu olmayan malzeme çizimde hata verir, içe aktarıcı bu malzemelere 1x1 beyaz doku ekler. Eksik doku da Heaps'te modelin tamamını düşürür, bu yüzden modelden çıkarılıp uyarı verilir.
-- Seçim mesh üçgenlerine bakar. Heaps indekssiz `Polygon` için çarpışma verisi üretemez, `Picker` bunları kendi üçgen testiyle tarar. Yeni bir primitive türü `getCollider` veremezse seçici sınır kutusuna düşer, geniş bir kutu bütün tıklamaları yutar.
-- `ModelLibrary.load` modeli tek önbellekten verir, kopyalar geometri ve dokuyu paylaşır. Bileşenler `ModelCache` açmamalı.
-- Model başvurusu katalog kimliği ya da dosya yoludur (`scene.ModelRef`). Oyun kataloğu `ModelRef.catalog`'a verir (kimlik → dosya); `ModelLibrary.load`, `animation` ve `exists` başvuruyu kabul eder. Kimlik `[a-z0-9_]`, yol `/` ya da uzantı içerir; eski içerikteki yollar okunmaya devam eder. `ModelRef` Heaps'e bağlı değildir.
-- Editörde `editor.actions.catalog` (`{find, ensure}`) verilirse sahneye bırakılan dosyanın alanına katalog kimliği yazılır; satır yoksa `ensure`'un tablo komutu nesneyle aynı geri alma adımına girer. İçe aktarma (Asset Browser ve ajanın `import_model`'i) da satırı ekler; `import_model` kimliği `catalog` olarak döner, `list_models` dosyaların kimliğini verir. `editor.data.onApplied` her tablo uygulanışında (düzenleme, geri alma, ajan) hemen çağrılır; oyun önbelleğini orada boşaltırsa aynı karedeki okuma yeni tabloyu görür.
-- `SceneInstance.observers`: oyunun sistemleri (fizik gibi) nesnelerin oyunda başlamasını (bileşenler başladıktan sonra) ve silinmesini (bileşenler kapanmadan önce) dinler. Yalnızca oyun kipinde, sahne başlamışken.
-- Komut satırından içe aktarma: `./run.sh ice-aktar <dosya ya da klasör>` (`scene.editor.ImportMain`, `import-mac.hxml`; Windows'ta bayt kodu için `import.hxml`). Pencere açmaz, editörle aynı `AssetImporter.run`; klasördeki modellerin hepsi aktarılır. Katalog satırını oyun ekler.
-- Çarpışma bileşeni (`ColliderComponent`) yalnızca veridir; oyunun fizik servisi `ColliderComponent.bridge`'i (`added`, `removed`, `moved`) verirse bileşen oyunda başlayınca (`onStart`), silinince ve taşınınca haber verir. Sonradan bağlanan servis yüklü arazi hücrelerini `WorldTerrain.loaded()` ile kurar, sonrakileri `WorldView.terrainChanged` ile alır.
-- `FocusGuard.install()` odak kaybında tuşları bırakır. Heaps bunu yapmaz, Cmd+Tab veya Alt+Tab sonrası tuş basılı kalır. Editör kendisi kurar, oyun `init` içinde çağırır.
-- Mac'te HL/C clang ile `-O2 -g` derlenir (`-O0`'dan yaklaşık 7 kat hızlı, derleme birkaç saniye uzun) ve `-fwrapv` şarttır: Haxe'nin Int'i taşınca sarar, C'de işaretli taşma tanımsızdır. `-O1` ve üstünde karma ve rastgele sayı döngüleri bozulur (FNV tohumu her metinde 0 çıkıyordu). `tools/run.sh` bayrağı verir; kendi derleme betiğine de ekle.
-- Heaps kamerası sol ellidir: ekranın sağı bakış yönünün saat yönünün tersindedir. Kamera yönleri kendi vektörleriyle değil, noktanın ekranda gittiği yerle test edilir.
-- Heaps yatay tekerlek değerini atar. Mac'teki yamalı `hxd.Window` bunu `horizontalWheel` alanında saklar, Option + iki parmak böyle döndürür. Windows'ta bu değer yoktur, orada Ctrl + iki parmak döndürür. `hlsdl` iki değeri de tam sayıya keser, 1'in altındaki çok yavaş kaydırma kaybolur.
-- ImGui çizim listesi renkleri `0xAARRGGBB` biçimindedir.
-- hlimgui bağlamasında iki tuzak var: `selectable` sabit `true`/`false` ile çöker, değer değişkenle verilir. `getColorU32(ImGuiCol.X)` saydam döner, `getStyleColorVec4` kullanılır.
+- Call `editor.render(e)` in `Main.render`; model previews are drawn there.
+- Frame guard (`scene.editor.FrameGuard`): when an editor frame is cut short, Dear ImGui stops the application at the next `NewFrame` (assert, abort) and unsaved work is lost. The application hooks up four places; the template's `Main.hx` is an example:
+  - `FrameGuard.install()` in `init`: Heaps' error reporting is wrapped and the error text is kept.
+  - `FrameGuard.beforeFrame()` at the start of `mainLoop`, with the result passed to `editor.frameFailed`: if the previous frame was cut short, ImGui is recovered.
+  - The body of `update` runs inside `FrameGuard.run`, with the error passed to `editor.failed`.
+  - In `render`, scene drawing is inside a `try`, with the error passed to `editor.renderFailed`: render targets are released and the ImGui interface is still drawn.
+  - The editor draws its own sections and every panel with `FrameGuard.run`. A panel that fails stays stopped until "Yeniden dene" (Try again). The error appears in the notification, the Warnings panel, the log and the agent's `get_warnings` tool, and the scene is backed up at once (`SceneDocument.backupNow`, at most once every 10 seconds).
+  - The native side, `editor/native/imgui_guard.cpp`, is compiled into the hlimgui extension. Third-party hlimgui is not touched: on Mac `tools/build-hlimgui.sh` adds it to the source list, and on Windows the `tools/hlimgui/CMakeLists.txt` wrapper adds it to the same target.
+  - When the extension changes, `tools/hlimgui-surum.txt` (version) goes up. The build scripts write the stamp next to the hdll; `run.sh editor` and `run.bat editor` recognize an old hdll and say to rebuild it. An old hdll lacks the new native functions, and HashLink would report that at startup with an obscure error.
+- The editor binary opens as the game with `--play <scene> --camera x y z x y z`, which `PlayOptions.parse(Sys.args())` reads. "Buradan oyna" (Play from here) uses this, because the game build carries its resources embedded and does not see a newly saved scene.
+- Personal settings are under `.editor/` and do not go into git: recently opened files, what is hidden in the editor, automatic backups.
+- Visibility is two separate states. `entity.active` is written into the scene and affects the game; `entity.hiddenInEditor` only applies on that computer. They are independent: an object turned off in the game stays editable in the editor.
+- Import writes a model under `assets/` (FBX; GLB, glTF and OBJ converted with Blender) as HMD under `res/models/`; those under `assets/models/mock/` go under `res/models/mock/`. It can be called without the editor interface: `new AssetImporter().run(source)`. The game build converts FBX inside a macro and needs `meshTools` for a model with a normal map; HMD has no such step. A new game's `.gitattributes` must have `*.hmd` in LFS.
+- Heaps' normal map and specular shaders take the UV from the base color texture. A material without a base texture fails when drawn, so the importer adds a 1x1 white texture to such materials. A missing texture also drops the whole model in Heaps, so it is removed from the model with a warning.
+- Selection looks at mesh triangles. Heaps cannot produce collision data for a non-indexed `Polygon`, so `Picker` scans these with its own triangle test. If a new primitive type cannot provide `getCollider`, the picker falls back to the bounding box, and a large box swallows every click.
+- `ModelLibrary.load` returns models from a single cache, and copies share geometry and textures. Components must not open a `ModelCache`.
+- A model reference is a catalog ID or a file path (`scene.ModelRef`). The game gives its catalog to `ModelRef.catalog` (ID → file); `ModelLibrary.load`, `animation` and `exists` accept a reference. An ID is `[a-z0-9_]`, while a path contains `/` or an extension; paths in old content keep working. `ModelRef` does not depend on Heaps.
+- If `editor.actions.catalog` (`{find, ensure}`) is given in the editor, the catalog ID is written into the field of a file dropped into the scene; if there is no row, `ensure`'s table command goes into the same undo step as the object. Import (the Asset Browser and the agent's `import_model`) also adds the row; `import_model` returns the ID as `catalog`, and `list_models` gives the files' IDs. `editor.data.onApplied` is called right away every time a table is applied (edit, undo, agent); if the game clears its cache there, a read in the same frame sees the new table.
+- `SceneInstance.observers`: the game's systems (such as physics) listen for objects starting in the game (after their components start) and for their removal (before their components close). Only in play mode, once the scene has started.
+- Import from the command line: `./run.sh ice-aktar <file or folder>` (import; `scene.editor.ImportMain`, `import-mac.hxml`; on Windows, `import.hxml` for bytecode). It opens no window and uses the same `AssetImporter.run` as the editor; every model in a folder is imported. The game adds the catalog row.
+- The collider component (`ColliderComponent`) is data only; if the game's physics service provides `ColliderComponent.bridge` (`added`, `removed`, `moved`), the component reports when it starts in the game (`onStart`), when it is removed and when it moves. A service connected later builds the loaded terrain cells with `WorldTerrain.loaded()` and gets the rest through `WorldView.terrainChanged`.
+- `FocusGuard.install()` releases keys when focus is lost. Heaps does not, so a key stays pressed after Cmd+Tab or Alt+Tab. The editor installs it itself; the game calls it in `init`.
+- On Mac, HL/C is compiled with clang at `-O2 -g` (about 7 times faster than `-O0`, and the build takes a few seconds longer), and `-fwrapv` is required: Haxe's Int wraps on overflow, while signed overflow is undefined in C. At `-O1` and above, hash and random number loops break without it (the FNV seed came out as 0 for every string). `tools/run.sh` passes the flag; add it to your own build script too.
+- The Heaps camera is left-handed: the right of the screen is counterclockwise from the view direction. Test camera directions by where a point goes on screen, not by their own vectors.
+- Heaps drops the horizontal wheel value. The patched `hxd.Window` on Mac keeps it in the `horizontalWheel` field, which is how Option + two fingers rotates. Windows does not have this value; there Ctrl + two fingers rotates. `hlsdl` truncates both values to integers, so very slow scrolling below 1 is lost.
+- Colors in the ImGui draw list are in `0xAARRGGBB` format.
+- The hlimgui binding has two traps: `selectable` crashes with a constant `true`/`false`, so pass the value through a variable. `getColorU32(ImGuiCol.X)` returns transparent; use `getStyleColorVec4`.
 
-## Yüksek DPI (Retina ve Windows ölçeği)
+## High DPI (Retina and Windows scaling)
 
-Derlemeler `hidpi.hxml` ile gerçek piksel boyutunda çizer: Mac'te Retina, Windows'ta %125, %150, %200 gibi ekran ölçekleri. Heaps bunu desteklemediği için `hidpi/hxd/Window.hl.hx`, Heaps 2.1.0 dosyasının yamalı kopyasıdır. hlsdl 1.16 SDL3 kullanır, iki sistem farklı davranır (SDL3 README-highdpi):
+Builds draw at real pixel size with `hidpi.hxml`: Retina on Mac, and display scales such as 125%, 150% and 200% on Windows. Heaps does not support this, so `hidpi/hxd/Window.hl.hx` is a patched copy of the Heaps 2.1.0 file. hlsdl 1.16 uses SDL3, and the two systems behave differently (SDL3 README-highdpi):
 
-| | Pencere koordinatı | `pixelDensity` | `contentScale` (ekranın ölçeği) |
+| | Window coordinates | `pixelDensity` | `contentScale` (display scale) |
 | --- | --- | --- | --- |
-| Mac Retina | nokta | 2 | 2 |
-| Windows %150 | piksel | 1 | 1,5 |
+| Mac Retina | points | 2 | 2 |
+| Windows 150% | pixels | 1 | 1.5 |
 
-- `hidpi.hxml`, bütün `.hxml` dosyalarında (Mac ve Windows) `common.hxml`'den önce gelmelidir. Sonra gelirse Haxe, Heaps'in kendi dosyasını seçer ve derleme `pixelDensity` hatası verir.
-- Yama nokta–piksel dönüşümünü yalnızca Mac'te yapar (`pixelDensity`); Windows'ta pencere zaten pikseldir. Arayüzün büyütme payı ikisinde de `contentScale`'dir.
-- `HiDpi.prepare()` `main` içinde, SDL açılmadan çağrılır: Windows'ta süreç ekran başına DPI'a duyarlı açılır (`SDL_WINDOWS_DPI_AWARENESS=permonitorv2`), işletim sistemi görüntüyü bulanık büyütmez.
-- Oyun `init` içinde `HiDpi.fit(s2d, enKüçükYükseklik)` çağırır. `s2d` eski birimlerini korur, `s3d` ve `engine.width` gerçek pikseldir. `HiDpi.density` sahnenin ölçeğidir: oyunun seçimi (`HiDpi.choice`, sonra `HiDpi.refresh()`), yoksa ekranın ölçeği; sahne verilen yükseklikten kısa kalacaksa kısılır.
-- Pencere boyutu ölçeksiz birimle seçilir, piksel boyutu için `HiDpi.displayScale` ile çarpılır; masaüstü boyutuyla karşılaştırırken `displayScale / pixelDensity` (Mac'te 1, Windows'ta ölçek). Ölçekle büyüyen pencere masaüstünü aşabilir (%150 ölçekli 1080p ekranda 1280x720 → 1920x1080): oyun başlık ve görev çubuğu payıyla sığacak kadar küçültmeli, `fit`'e verilen en küçük yükseklik arayüzü yine sığdırır.
-- Editör `imguiScene` sahnesini yakınlaştırmaz, çünkü hlimgui kırpmayı ham pikselle yapar. Font ve stil `HiDpi.density` ile büyür.
-- Sabit boyutlu bitmap fontlar `s2d`'de yumuşatılarak büyütülür. Keskin olmaları için 2x atlas gerekir; ölçek 1'den büyükse 2x atlası yarım ölçekle çizmek (küçültmek) keskin kalır.
-- Windows davranışı belgeden (SDL3) kuruldu, Windows'ta denenmedi.
-- Heaps yükseltilirken yama yeni dosyaya yeniden uygulanır, değişen satırlar `HiDPI` ile işaretlidir.
-- Mac `.app` paketinin `Info.plist` dosyasında `NSHighResolutionCapable` açık olmalıdır.
+- `hidpi.hxml` must come before `common.hxml` in every `.hxml` file (Mac and Windows). If it comes after, Haxe picks Heaps' own file and the build fails with a `pixelDensity` error.
+- The patch converts between points and pixels only on Mac (`pixelDensity`); on Windows the window is already in pixels. The interface's scale factor is `contentScale` on both.
+- `HiDpi.prepare()` is called in `main`, before SDL starts: on Windows the process becomes per-monitor DPI aware (`SDL_WINDOWS_DPI_AWARENESS=permonitorv2`), so the operating system does not blur-scale the image.
+- The game calls `HiDpi.fit(s2d, minimumHeight)` in `init`. `s2d` keeps its old units, while `s3d` and `engine.width` are in real pixels. `HiDpi.density` is the scene's scale: the game's choice (`HiDpi.choice`, then `HiDpi.refresh()`), otherwise the display's scale; it is reduced if the scene would be shorter than the given height.
+- The window size is chosen in unscaled units and multiplied by `HiDpi.displayScale` for the pixel size; when comparing with the desktop size, use `displayScale / pixelDensity` (1 on Mac, the scale on Windows). A window that grows with the scale can exceed the desktop (on a 1080p display at 150%, 1280x720 → 1920x1080): the game should shrink it enough to fit with the title bar and taskbar, and the minimum height given to `fit` still fits the interface.
+- The editor does not zoom the `imguiScene` scene, because hlimgui clips in raw pixels. Fonts and style grow with `HiDpi.density`.
+- Fixed-size bitmap fonts are scaled up with smoothing in `s2d`. Staying sharp needs a 2x atlas; above scale 1, drawing the 2x atlas at half scale (scaling it down) stays sharp.
+- The Windows behavior was built from the documentation (SDL3) and has not been tried on Windows.
+- When Heaps is upgraded, the patch is applied again to the new file; the changed lines are marked with `HiDPI`.
+- In a Mac `.app` bundle, `NSHighResolutionCapable` must be enabled in `Info.plist`.
 
-## Testler
+## Tests
 
-Hızlı kontrol, proje kökünden: `haxe libs/scene-toolkit/tests.hxml`. Heaps'in matematik türlerini (`h3d.Vector`, `h3d.Matrix`) isteyen testler ayrı: `haxe libs/scene-toolkit/tests-heaps.hxml` (`tests/heaps`); yorumlayıcı Heaps'in model verisini (`hxd.fmt.hmd`) derleyemediği için buradaki kod ona bağlanmaz.
+Quick check, from the project root: `haxe libs/scene-toolkit/tests.hxml`. Tests that need Heaps' math types (`h3d.Vector`, `h3d.Matrix`) are separate: `haxe libs/scene-toolkit/tests-heaps.hxml` (`tests/heaps`). The interpreter cannot compile Heaps' model data (`hxd.fmt.hmd`), so the code there does not depend on it.
 
-Gerçek hedefte, HashLink'te: `./run.sh test` veya `run.bat test`. Sayı ve tip davranışı yorumlayıcıdan farklı olabildiği için asıl geçerli olan budur.
+On the real target, HashLink: `./run.sh test` or `run.bat test`. Number and type behavior can differ from the interpreter, so this is the one that counts.
+
+## License
+
+The toolkit is under the MIT License, the same license as Heaps: [LICENSE](LICENSE).
+
+Bundled third-party parts keep their own licenses:
+
+- `vendor/hashlink/`: [HashLink](https://github.com/HaxeFoundation/hashlink) libraries, MIT License ([HashLink license](https://github.com/HaxeFoundation/hashlink/blob/master/LICENSE)). `libopenal` is [OpenAL Soft](https://github.com/kcat/openal-soft), LGPL 2.1 ([OpenAL Soft license](https://github.com/kcat/openal-soft/blob/master/COPYING)).
+- `hidpi/hxd/Window.hl.hx`: a patched copy of a [Heaps](https://github.com/HeapsIO/heaps) file, MIT License ([hidpi/LICENSE_HEAPS](hidpi/LICENSE_HEAPS)).
+- `editor/fonts/`: DejaVu Sans Mono ([editor/fonts/LICENSE_DEJAVU](editor/fonts/LICENSE_DEJAVU)).
+- `third_party/hlimgui`: the [hlimgui](https://github.com/nspitko/hlimgui) submodule, under its own license.
