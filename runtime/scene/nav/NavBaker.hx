@@ -7,7 +7,7 @@ import scene.world.WorldTerrain;
 // Hücrenin yürünemeyen yerleri: dik yamaçlar ve engeller. Saf Haxe'dir, yerel kütüphane
 // gerektirmez. Aynı girdi aynı dosyayı üretir, sonuç değişmeyen hücre git farkı vermez.
 class NavBaker {
-  static inline var AGENT_RADIUS = 0.7;
+  public static inline var AGENT_RADIUS = 0.7;
 
   public static function bake(cell : Int, world : WorldData, terrain : WorldTerrain, shapes : Array<NavShape>) : NavCell {
     var size = world.navResolution;
