@@ -284,7 +284,10 @@ editor.actions.groundRay = ray -> terrain.raycast(ray);        // Without it, th
 editor.actions.addAssetType("fbx", "model", "path");           // Which component a dragged file is written to
 editor.validator.rules.push(scene -> myIssues(scene));         // A game rule that runs on save
 editor.addPanel("Factions", drawFactions);                     // A game-specific panel
+editor.inspector.sections.set("house", peers -> drawHouse(peers)); // A section under the component's fields in the Inspector
 ```
+
+- An Inspector section writes fields with `editor.inspector.editField(peers, name, value, edited)` right after its ImGui item (applied live while dragging, one undo step on release, like a field) or `setField(peers, name, value)` (one step at once).
 
 - Call `editor.render(e)` in `Main.render`; model previews are drawn there.
 - Frame guard (`scene.editor.FrameGuard`): when an editor frame is cut short, Dear ImGui stops the application at the next `NewFrame` (assert, abort) and unsaved work is lost. The application hooks up four places; the template's `Main.hx` is an example:

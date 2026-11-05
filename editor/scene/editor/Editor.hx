@@ -95,7 +95,7 @@ class Editor {
   // Asset Browser'dan sürüklenen dosya, `res` köküne göre.
   public var assetDrag : Null<String>;
 
-  var inspector : InspectorPanel;
+  public var inspector(default, null) : InspectorPanel;
   var assets : AssetBrowser;
   var worldPanel : WorldPanel;
   var dataPanel : DataPanel;

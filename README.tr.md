@@ -282,7 +282,10 @@ editor.actions.groundRay = ray -> terrain.raycast(ray);        // Verilmezse z =
 editor.actions.addAssetType("fbx", "model", "path");           // Sürüklenen dosya hangi bileşene yazılır
 editor.validator.rules.push(scene -> myIssues(scene));         // Kayıtta çalışan oyun kuralı
 editor.addPanel("Fraksiyonlar", drawFactions);                 // Oyuna özel panel
+editor.inspector.sections.set("house", peers -> drawHouse(peers)); // Inspector'da bileşenin alanlarının altında bölüm
 ```
+
+- Inspector bölümü alanı ImGui ögesinin hemen ardından `editor.inspector.editField(peers, ad, değer, edited)` ile yazar (sürüklerken canlı, bırakınca tek geri alma adımı, alan gibi) ya da `setField(peers, ad, değer)` ile (hemen, tek adım).
 
 - `Main.render` içinde `editor.render(e)` çağrılır, model önizlemeleri orada çizilir.
 - Kare koruması (`scene.editor.FrameGuard`): editörde bir kare yarıda kalınca Dear ImGui sonraki `NewFrame`'de uygulamayı durdurur (assert, abort) ve kaydedilmemiş iş gider. Uygulama dört yer bağlar, şablondaki `Main.hx` örnektir:

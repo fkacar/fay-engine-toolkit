@@ -33,6 +33,9 @@ class InspectorPanel {
   var nameStart = "";
   var transformStart : Transform;
   var fieldStarts : Array<Dynamic> = [];
+  // Oyunun bileşene özel bölümü (bileşen kimliği → çizim): bileşenin alanlarının altında çizilir. Bölüm alanları
+  // editField / setField ile yazar: alan düzenlemesiyle aynı yol (canlı uygulanır, bırakınca tek geri alma adımı).
+  public var sections(default, null) = new Map<String, Array<Component> -> Void>();
   var removing : Null<Array<Component>>;
 
   public function new(editor : Editor) {
@@ -177,6 +180,8 @@ class InspectorPanel {
     }
     if (open) {
       for (field in component.describeFields()) drawField(peers, field);
+      var section = sections.get(name);
+      if (section != null) section(peers);
       var route = Std.downcast(component, PathMarker);
       if (route != null && ImGui.button("Nokta ekle")) editor.actions.addWaypoint(route);
       if (component.entity.instanceRoot == null) drawAddable(peers, component.addable());
@@ -360,6 +365,18 @@ class InspectorPanel {
       if (ImGui.selectable(entity.name + "##" + entity.id, chosen)) set(peers, field, entity.id);
     }
     ImGui.endCombo();
+  }
+
+  // Bölümler için: adlı alanı ImGui ögesiyle düzenler (son çizilen öge; edited o karede değişti mi).
+  public function editField(peers : Array<Component>, name : String, value : Dynamic, edited : Bool) {
+    var field = Lambda.find(peers[peers.length - 1].describeFields(), f -> f.name == name);
+    if (field != null) trackEdit(peers, field, value, edited);
+  }
+
+  // Bölümler için: adlı alanı hemen yazar (tek geri alma adımı).
+  public function setField(peers : Array<Component>, name : String, value : Dynamic) {
+    var field = Lambda.find(peers[peers.length - 1].describeFields(), f -> f.name == name);
+    if (field != null) set(peers, field, value);
   }
 
   function set(peers : Array<Component>, field : FieldInfo, value : Dynamic) {
