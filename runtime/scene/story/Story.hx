@@ -10,6 +10,10 @@ class Story {
   public var messages(default, null) : Array<String> = [];
   // Verilirse her adım kaydedilir: editörden açılan oyun ve görev testi kullanır.
   public var log(default, set) : Null<StoryLog>;
+  // Tetikleyicinin koşulları tuttu, eylemleri çalışacak (onFire) ve çalıştı (onFired). Oyunun olay kaydı eylemlerin
+  // yaptığı değişiklikleri tetikleyiciye bağlar.
+  public var onFire : Null<Entity->Void>;
+  public var onFired : Null<Entity->Void>;
 
   var read : String->Null<String>;
   var listeners = new Map<String, Array<Entity>>();
@@ -44,10 +48,12 @@ class Story {
       }
     }
     if (log != null) log.add("tetikleyici", {trigger: entity.name, id: entity.id, actions: [for (component in entity.components) if (Std.isOfType(component, TriggerAction)) component.title()]});
+    if (onFire != null) onFire(entity);
     for (component in entity.components) {
       var action = Std.downcast(component, TriggerAction);
       if (action != null) action.run(this);
     }
+    if (onFired != null) onFired(entity);
     return true;
   }
 
