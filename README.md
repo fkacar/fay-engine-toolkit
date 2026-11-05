@@ -346,7 +346,7 @@ The toolkit is under the MIT License, the same license as Heaps: [LICENSE](LICEN
 
 Bundled third-party parts keep their own licenses:
 
-- `vendor/hashlink/`: [HashLink](https://github.com/HaxeFoundation/hashlink) libraries, MIT License ([HashLink license](https://github.com/HaxeFoundation/hashlink/blob/master/LICENSE)). `libopenal` is [OpenAL Soft](https://github.com/kcat/openal-soft), LGPL 2.1 ([OpenAL Soft license](https://github.com/kcat/openal-soft/blob/master/COPYING)).
+- `vendor/hashlink/`: [HashLink](https://github.com/HaxeFoundation/hashlink) libraries, MIT License ([HashLink license](https://github.com/HaxeFoundation/hashlink/blob/master/LICENSE)). `libopenal` is [OpenAL Soft](https://github.com/kcat/openal-soft), GNU LGPL 2 ([OpenAL Soft license](https://github.com/kcat/openal-soft/blob/master/COPYING)).
 - `hidpi/hxd/Window.hl.hx`: a patched copy of a [Heaps](https://github.com/HeapsIO/heaps) file, MIT License ([hidpi/LICENSE_HEAPS](hidpi/LICENSE_HEAPS)).
 - `editor/fonts/`: DejaVu Sans Mono ([editor/fonts/LICENSE_DEJAVU](editor/fonts/LICENSE_DEJAVU)).
 - `third_party/hlimgui`: the [hlimgui](https://github.com/nspitko/hlimgui) submodule, under its own license.

@@ -344,7 +344,7 @@ Araç takımı Heaps ile aynı lisansla, MIT Lisansı altındadır: [LICENSE](LI
 
 İçindeki üçüncü taraf parçalar kendi lisanslarını korur:
 
-- `vendor/hashlink/`: [HashLink](https://github.com/HaxeFoundation/hashlink) kitaplıkları, MIT Lisansı ([HashLink lisansı](https://github.com/HaxeFoundation/hashlink/blob/master/LICENSE)). `libopenal`, [OpenAL Soft](https://github.com/kcat/openal-soft), LGPL 2.1 ([OpenAL Soft lisansı](https://github.com/kcat/openal-soft/blob/master/COPYING)).
+- `vendor/hashlink/`: [HashLink](https://github.com/HaxeFoundation/hashlink) kitaplıkları, MIT Lisansı ([HashLink lisansı](https://github.com/HaxeFoundation/hashlink/blob/master/LICENSE)). `libopenal`, [OpenAL Soft](https://github.com/kcat/openal-soft), GNU LGPL 2 ([OpenAL Soft lisansı](https://github.com/kcat/openal-soft/blob/master/COPYING)).
 - `hidpi/hxd/Window.hl.hx`: [Heaps](https://github.com/HeapsIO/heaps) dosyasının yamalı kopyası, MIT Lisansı ([hidpi/LICENSE_HEAPS](hidpi/LICENSE_HEAPS)).
 - `editor/fonts/`: DejaVu Sans Mono ([editor/fonts/LICENSE_DEJAVU](editor/fonts/LICENSE_DEJAVU)).
 - `third_party/hlimgui`: [hlimgui](https://github.com/nspitko/hlimgui) alt modülü, kendi lisansıyla.
