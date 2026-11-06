@@ -39,6 +39,72 @@ class NavWorld {
 
   public function forget(cell : Int) {
     cells.remove(cell);
+    regions = null;
+  }
+
+  // Bağlı bölgeler: birbirine yolu olan yürünebilir düğüm kümeleri (A*'ın komşuluğuyla, köşe kuralı dahil). İlk gerektiğinde
+  // taşkınla etiketlenir; yol ağı değişince (forget) atılır. 0 etiketsiz, -1 engel. Hedef başka bölgedeyse (çevresi kapalı
+  // cep, yayla) arama hedefe en yakın ulaşılabilir düğüme yönelir: o düğüm başlangıçtan bağımsızdır, yakın ve uzak katman
+  // aynı yere varır; ulaşılamayan hedef aramaya bütün dünyayı açtırmaz (Anıt 1'in yaylası, 6 Kasım 2026).
+  var regions : Null<haxe.ds.Vector<Int>>;
+  var nextRegion = 1;
+
+  function regionOf(node : Int) : Int {
+    if (regions == null) {
+      regions = new haxe.ds.Vector(nodesX * nodesY);
+      for (i in 0...regions.length) regions[i] = 0;
+      nextRegion = 1;
+    }
+    var label = regions[node];
+    if (label != 0) return label;
+    if (isBlocked(node % nodesX, Std.int(node / nodesX))) {
+      regions[node] = -1;
+      return -1;
+    }
+    var mark = nextRegion++, queue = [node], head = 0;
+    regions[node] = mark;
+    while (head < queue.length) {
+      var at = queue[head++], x = at % nodesX, y = Std.int(at / nodesX);
+      for (dy in -1...2)
+        for (dx in -1...2) {
+          if (dx == 0 && dy == 0) continue;
+          var nx = x + dx, ny = y + dy;
+          if (isBlocked(nx, ny)) continue;
+          if (dx != 0 && dy != 0 && (isBlocked(x + dx, y) || isBlocked(x, y + dy))) continue;
+          var next = ny * nodesX + nx;
+          if (regions[next] != 0) continue;
+          regions[next] = mark;
+          queue.push(next);
+        }
+    }
+    return mark;
+  }
+
+  // Düğüme en yakın, verilen bölgedeki düğüm (halka halka dışa; ilk bulunan halkadan kökü iki katı halkaya kadar en kısa
+  // düz uzaklık). Bulunamazsa -1.
+  function nearestInRegion(node : Int, mark : Int) : Int {
+    var cx = node % nodesX, cy = Std.int(node / nodesX), limit = Std.int(Math.max(nodesX, nodesY));
+    var best = -1, bestDistance = Math.POSITIVE_INFINITY, stop = limit;
+    var ring = 1;
+    while (ring <= stop && ring <= limit) {
+      for (i in 0...ring * 8) {
+        var side = Std.int(i / (ring * 2)), t = i % (ring * 2) - ring;
+        var dx = side == 0 ? t : side == 1 ? ring : side == 2 ? -t : -ring;
+        var dy = side == 0 ? -ring : side == 1 ? t : side == 2 ? ring : -t;
+        var x = cx + dx, y = cy + dy;
+        if (x < 0 || y < 0 || x >= nodesX || y >= nodesY) continue;
+        var at = y * nodesX + x;
+        if (regionOf(at) != mark) continue;
+        var distance = dx * dx + dy * dy;
+        if (distance < bestDistance) {
+          best = at;
+          bestDistance = distance;
+        }
+      }
+      if (best >= 0 && stop == limit) stop = Std.int(Math.ceil(ring * 1.4143));
+      ring++;
+    }
+    return best;
   }
 
   public function isWalkable(x : Float, y : Float) {
@@ -53,7 +119,8 @@ class NavWorld {
     return node < 0 ? null : pointOf(node);
   }
 
-  // Son nokta hedeftir. Hedefe yol yoksa ulaşılabilen en yakın yere kadar gider.
+  // Son nokta hedeftir. Hedefe yol yoksa (hedef başka bölgede) hedefe en yakın ulaşılabilir düğüme gider; o düğüm
+  // başlangıçtan bağımsızdır.
   public function findPath(fromX : Float, fromY : Float, toX : Float, toY : Float) : Array<NavPoint> {
     var goal : NavPoint = {x: toX, y: toY};
     var start = nearestOpen(nodeX(fromX), nodeY(fromY));
@@ -61,7 +128,19 @@ class NavWorld {
     lastExpansions = 0;
     lastReached = start >= 0 && end >= 0;
     if (start < 0 || end < 0) return [goal];
-    if (start == end) return [goal];
+    var away = false;
+    var home = regionOf(start);
+    if (regionOf(end) != home) {
+      var reachable = nearestInRegion(end, home);
+      if (reachable >= 0) {
+        end = reachable;
+        away = true;
+      }
+    }
+    if (start == end) {
+      lastReached = !away;
+      return [away ? pointOf(end) : goal];
+    }
 
     var open = new NodeHeap();
     var cost = new Map<Int, Float>();
@@ -103,12 +182,12 @@ class NavWorld {
         }
     }
     lastExpansions = expansions;
-    lastReached = best == end;
+    lastReached = best == end && !away;
     var nodes = [best];
     while (came.exists(nodes[nodes.length - 1])) nodes.push(came.get(nodes[nodes.length - 1]));
     nodes.reverse();
     var points = [for (node in smooth(nodes)) pointOf(node)];
-    if (best == end) points[points.length - 1] = isWalkable(toX, toY) ? goal : pointOf(end);
+    if (best == end) points[points.length - 1] = !away && isWalkable(toX, toY) ? goal : pointOf(end);
     return points;
   }
 

@@ -1970,6 +1970,15 @@ class TestMain {
     check(end.x < 0, 'duvarı geçmemeli: ${end.x}');
     check(end.x > -5, 'duvara en yakın yere gitmeli: ${end.x}');
 
+    // Ulaşılamayan hedef: iki ayrı başlangıçtan aynı yere varılır (hedefe en yakın ulaşılabilir düğüm; Anıt 1'in yaylası,
+    // yakın ve uzak katman farklı yerlere varıyordu), arama bütün bölgeyi açmaz, varılmadığı söylenir.
+    var other = closed.nav.findPath(-15, 8, 15, 0);
+    var otherEnd = other[other.length - 1];
+    check(Math.abs(otherEnd.x - end.x) < 1e-6 && Math.abs(otherEnd.y - end.y) < 1e-6, 'ulaşılamayan hedefte iki başlangıç aynı yere: (${end.x}, ${end.y}) / (${otherEnd.x}, ${otherEnd.y})');
+    check(!closed.nav.lastReached, "ulaşılamayan hedef: varılmadı");
+    Sys.println('  yol ağı, ulaşılamayan hedef: (${end.x}, ${end.y}) ve (${otherEnd.x}, ${otherEnd.y}), ${closed.nav.lastExpansions} düğüm');
+    check(Math.abs(end.y) < 2.5, 'hedefe en yakın ulaşılabilir yer hedefin hizasında: ${end.y}');
+
     // Başlangıç engelin içindeyse en yakın açık yerden çıkar
     check(closed.nav.findPath(0, 0, -15, 0).length >= 1, "engel içinden çıkabilmeli");
 
