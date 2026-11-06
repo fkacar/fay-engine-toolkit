@@ -24,6 +24,10 @@ class NavWorld {
   var nodesX : Int;
   var nodesY : Int;
   var cells = new Map<Int, Null<NavCell>>();
+  // Son aramanın açtığı düğüm sayısı ve hedefe varıp varmadığı (varamazsa yol hedefe en yakın bulunan düğümde biter:
+  // hedef ulaşılamaz ya da arama MAX_EXPANSIONS'a takıldı). Tanı için.
+  public var lastExpansions(default, null) = 0;
+  public var lastReached(default, null) = false;
 
   public function new(state : WorldState) {
     this.state = state;
@@ -54,6 +58,8 @@ class NavWorld {
     var goal : NavPoint = {x: toX, y: toY};
     var start = nearestOpen(nodeX(fromX), nodeY(fromY));
     var end = nearestOpen(nodeX(toX), nodeY(toY));
+    lastExpansions = 0;
+    lastReached = start >= 0 && end >= 0;
     if (start < 0 || end < 0) return [goal];
     if (start == end) return [goal];
 
@@ -96,6 +102,8 @@ class NavWorld {
           open.push(next, total + estimate(next, end));
         }
     }
+    lastExpansions = expansions;
+    lastReached = best == end;
     var nodes = [best];
     while (came.exists(nodes[nodes.length - 1])) nodes.push(came.get(nodes[nodes.length - 1]));
     nodes.reverse();

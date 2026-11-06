@@ -39,6 +39,8 @@ class SceneDocument {
   var scene : SceneInstance;
   var autosaveTimer = 0.;
   var autosavedRevision = 0;
+  // Bu oturumun yazdığı yedek duruyor mu. Açılışta bulunan eski yedeğe (tasarımcı karar verecek) dokunulmaz.
+  var backupWritten = false;
 
   public function new(editor : Editor, scene : SceneInstance, path : String, ?state : WorldState) {
     this.editor = editor;
@@ -88,6 +90,7 @@ class SceneDocument {
     }
     editor.commands.markSaved();
     removeAutosave();
+    backupWritten = false;
     prefs.addRecent(path);
     lastSaved = DateTools.format(Date.now(), "%H:%M:%S");
     validate();
@@ -327,12 +330,24 @@ class SceneDocument {
   // Otomatik yedek şimdi: süre beklenmez (editörde hata olunca da çağrılır). Yedeklenecek değişiklik yoksa false.
   public function backupNow() : Bool {
     var commands = editor.commands;
-    if (!commands.isDirty || commands.revision == autosavedRevision) return false;
+    // Değişiklikler geri alınıp kayıtlı hale dönüldü: bu oturumun yedeği artık eskidir, silinir (yoksa sonraki açılışta
+    // geri alınmış değişiklik "Yedeği aç" ile geri gelir; sınavın geri alması da böyle iz bırakıyordu).
+    if (!commands.isDirty) {
+      // Açılışta bulunan yedek için karar bekleniyorsa (hasRecovery) dokunulmaz: dünya yedeği hücre hücre yazılır.
+      if (backupWritten && !hasRecovery) {
+        try removeAutosave() catch (e : Dynamic) editor.show('Eski otomatik yedek silinemedi: $e', true);
+        backupWritten = false;
+        autosavedRevision = -1;
+      }
+      return false;
+    }
+    if (commands.revision == autosavedRevision) return false;
     try {
       if (!FileSystem.exists(AUTOSAVE_DIRECTORY)) FileSystem.createDirectory(AUTOSAVE_DIRECTORY);
       if (world != null) world.autosave(AUTOSAVE_WORLD);
       else File.saveContent(autosavePath(), SceneFormat.write(scene.toData()));
       autosavedRevision = commands.revision;
+      backupWritten = true;
       return true;
     } catch (e : Dynamic) {
       editor.show('Otomatik yedek alınamadı: $e', true);

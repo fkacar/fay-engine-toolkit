@@ -15,6 +15,8 @@ import sys.io.File;
 class ExamTools {
   public static inline var DIRECTORY = "tests/ajan-sinavi";
   public static inline var SUFFIX = ".sinav.json";
+  // Yol ağı dosyaları kayıtta yeniden üretilir (türetilmiş): sınavdan önceki halleri saklanır, geri alınca yazılır.
+  static inline var NAV_SUFFIX = ".nav.json";
   public static inline var RESULTS = "tests/ajan-sinavi/sonuclar.jsonl";
   public static inline var NEW = "$yeni";
   // Görevin sınav dışında bıraktığı test dosyaları silinmez, buraya taşınır.
@@ -160,6 +162,9 @@ class ExamTools {
         // Beklentinin türü (örneğin oyunun "patrol" beklentisi): testte o türden bir expect adımı olmalı.
         if (spec.expect != null && !Lambda.exists(steps, step -> step.expect != null && Reflect.hasField(step.expect, spec.expect)))
           return {ok: false, detail: '$name testinde ${spec.expect} beklentisi yok'};
+        // Adımın türü (örneğin oyunun "aid" adımı): testte o türden bir adım olmalı (sonucu beklemekle geçilmesin).
+        if (spec.step != null && !Lambda.exists(steps, step -> Reflect.hasField(step, spec.step)))
+          return {ok: false, detail: '$name testinde ${spec.step} adımı yok'};
         // Kayıttan başlayan test: oyuncunun kaydındaki hatayı yeniden üretip düzeltmeyi doğrulamak için.
         if (spec.save == true && (try PlayTests.load(name).save catch (e : Dynamic) null) == null)
           return {ok: false, detail: '$name testi bir kayıttan başlamıyor (save alanı yok)'};
@@ -347,6 +352,7 @@ class ExamTools {
       clean: editor.document.unsavedFiles().length == 0,
       tests: PlayTests.list(),
       objectFiles: editor.document.world == null ? [] : editor.document.world.objectFiles(),
+      navs: navFiles(editor.document.world == null ? [] : editor.document.world.objectFiles()),
       undoCount: editor.commands.undoCount,
       entities: [for (entity in editor.scene.entities) entity.id => true],
       issues: [for (issue in editor.document.issues) issue.message => true],
@@ -391,13 +397,15 @@ class ExamTools {
     dirs.reverse();
     for (dir in dirs) if (FileSystem.exists(dir) && FileSystem.readDirectory(dir).length == 0) FileSystem.deleteDirectory(dir);
     while (editor.commands.undoCount > base.undoCount) editor.commands.undo();
-    var saved = false, note : Null<String> = null, dropped = [];
+    var saved = false, note : Null<String> = null, dropped = [], navRestored : Array<String> = [];
     if (editor.commands.isDirty) {
       if (base.clean) {
         saved = editor.document.save();
         var world = editor.document.world;
         if (saved && world != null)
           for (path in world.objectFiles()) if (base.objectFiles.indexOf(path) < 0 && world.dropEmptyObjectFile(path)) dropped.push('res/$path');
+        // Görevin kaydı yol ağını yeniden üretmişse (yeni nesne hücreyi değiştirir) sınavdan önceki hali geri yazılır.
+        if (saved && world != null) navRestored = restoreNavs(base, world.objectFiles().concat(base.objectFiles));
       } else note = "Görev sırasında kaydedildi; disk sınav öncesinden farklı. Kaydedersen senin halin yazılır.";
     }
     var releaseNow = FileSystem.exists(ReleaseIds.PATH) ? sys.io.File.getContent(ReleaseIds.PATH) : null;
@@ -420,8 +428,38 @@ class ExamTools {
     editor.viewport.camera.place(base.camera.target, base.camera.distance, base.camera.yaw, base.camera.pitch);
     editor.selection.set([for (id in base.selection) if (editor.scene.find(id) != null) editor.scene.find(id)]);
     var result : Dynamic = {saved: saved, movedTests: moved, removedEmptyFiles: dropped};
+    if (navRestored.length > 0) result.restoredNavFiles = navRestored;
     if (note != null) result.note = note;
     return result;
+  }
+
+  // Dünyanın klasörlerindeki yol ağı dosyaları ve içerikleri (yol res/ ile).
+  static function navFiles(objectFiles : Array<String>) : Map<String, String> {
+    var dirs = new Map<String, Bool>(), found = new Map<String, String>();
+    for (path in objectFiles) dirs.set('res/' + haxe.io.Path.directory(path), true);
+    for (dir in dirs.keys()) if (FileSystem.exists(dir) && FileSystem.isDirectory(dir))
+      for (file in FileSystem.readDirectory(dir)) if (StringTools.endsWith(file, NAV_SUFFIX)) found.set('$dir/$file', File.getContent('$dir/$file'));
+    return found;
+  }
+
+  // Değişen yol ağı dosyası sınavdan önceki haline, görevde oluşan silinir. Döner: dokunulan dosyalar.
+  static function restoreNavs(base : Baseline, objectFiles : Array<String>) : Array<String> {
+    var touched = [];
+    for (path => text in navFiles(objectFiles)) {
+      var before = base.navs.get(path);
+      if (before == null) {
+        FileSystem.deleteFile(path);
+        touched.push(path);
+      } else if (before != text) {
+        File.saveContent(path, before);
+        touched.push(path);
+      }
+    }
+    for (path => text in base.navs) if (!FileSystem.exists(path)) {
+      File.saveContent(path, text);
+      touched.push(path);
+    }
+    return touched;
   }
 
   function ids() : Array<String> {
@@ -464,6 +502,7 @@ typedef Baseline = {
   clean : Bool,
   tests : Array<String>,
   objectFiles : Array<String>,
+  navs : Map<String, String>,
   undoCount : Int,
   entities : Map<String, Bool>,
   issues : Map<String, Bool>,
