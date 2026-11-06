@@ -112,7 +112,11 @@ class DialogLayout {
       case Dialog.END: [];
       default: [node.next];
     };
-    return [for (target in found) target == null ? 0 : target];
+    // Açık türlü dizi: HashLink'te Array<Null<Int>> kutulu değerlerle (ArrayObj) durur, Array<Int> diye dönerse
+    // kullanan yerde "Can't cast ArrayObj to ArrayBytes_Int" ile çöker (ajanın get_dialog_lines'ı, 6 Kasım 2026).
+    var result : Array<Int> = [];
+    for (target in found) result.push(target == null ? 0 : target);
+    return result;
   }
 
   public static function shorten(text : String, limit : Int) {

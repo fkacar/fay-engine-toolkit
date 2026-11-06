@@ -25,7 +25,7 @@ class PlayTools {
       schema: {type: "object", properties: {limit: {type: "integer"}, type: {type: "string", description: "Yalnızca bu türdeki kayıtlar"}}},
       run: args -> ({value: readTrace(args.limit == null ? TRACE_LIMIT : args.limit, args.type)} : AgentReply)});
     server.add({name: "list_quest_tests", readOnly: true,
-      description: "res/tests altındaki görev testleri. Biçim kılavuzda: title, start {near, distance}, save (isteğe bağlı kayıt dosyası: test o kayıttan başlar), timeout ve steps (walkTo, waitDialog, advance, choose, wait, expect {item|flag|standing|fired|dialogOpen|message, atLeast|equals|atMost} ya da {patrol: doğma alanının adı, wentFar: test boyunca uzak katmana geçti mi, landed: şimdi sahnede mi, near: yer adı, distance}).",
+      description: "res/tests altındaki görev testleri. Biçim kılavuzda: title, start {near, distance}, save (isteğe bağlı kayıt dosyası: test o kayıttan başlar), timeout ve steps (walkTo, waitDialog, advance, choose, wait, oyunun adımları (skipHours, design), expect {item|flag|standing|fired|dialogOpen|designOpen|day|hour|message, atLeast|equals|atMost} ya da {patrol: doğma alanının adı, wentFar: test boyunca uzak katmana geçti mi, landed: şimdi sahnede mi, near: yer adı, distance}).",
       schema: {type: "object", properties: {}},
       run: _ -> ({value: [for (name in PlayTests.list()) {name: name, test: PlayTests.load(name)}]} : AgentReply)});
     server.add({name: "run_quest_test", readOnly: true,

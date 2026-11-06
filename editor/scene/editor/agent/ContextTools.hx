@@ -622,8 +622,9 @@ class ContextTools {
   static function order(dialog : Dialog) : Array<Int> {
     var start = dialog.start();
     var seen = new Map<Int, Bool>();
-    var result = [];
-    var queue = start == null ? [] : [start.id];
+    var result : Array<Int> = [];
+    var queue : Array<Int> = [];
+    if (start != null) queue.push(start.id);
     while (queue.length > 0) {
       var id = queue.shift();
       if (seen.exists(id) || dialog.node(id) == null) continue;
