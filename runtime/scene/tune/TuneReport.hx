@@ -14,7 +14,12 @@ class TuneReport {
     out.add('# Ayar raporu: ${module.title}\n\n');
     if (module.source == TuneModule.SYNTHETIC)
       out.add('> **Kaynak: sentetik senaryo.** Olay sıklıkları ve tehlike durumları tahmin edildi, gerçek oyun izlerinden gelmiyor. Bu rapor öneridir; değerler tabloya uygulanmaz (docs/OPTIMIZASYON_PLANI.md, Gerçek veri).\n\n');
-    else out.add('> Kaynak: gerçek oyun izleri.\n\n');
+    else {
+      var partial = module.syntheticTunables();
+      out.add(partial.length == 0 ? '> Kaynak: gerçek oyun izleri.\n\n'
+        : '> Kaynak: gerçek oyun izleri, ama şu ayarların senaryosu sentetik (tahmin); önerileri yazılır, uygulanmaz: '
+          + [for (t in partial) '`${t.id}`'].join(", ") + '.\n\n');
+    }
     out.add('Optimizasyon motoru (docs/OPTIMIZASYON_PLANI.md). Üretildi: $date. Yöntem: ${result.method}; ${result.evaluated} kombinasyon denendi. ');
     out.add('Eğitim tohumları ${module.seeds.join(", ")}, doğrulama tohumları ${module.validation.join(", ")}.');
     if (result.rejected > 0) out.add(' Eğitimde daha yüksek puanlı ${result.rejected} aday doğrulama tohumlarında sert sınırı aştığı için seçilmedi (aşırı uyum).');
@@ -29,6 +34,7 @@ class TuneReport {
     for (tunable in module.tunables) {
       var before = base.config.get(tunable.id), after = best.config.get(tunable.id);
       var mark = tunable.locked == true ? " (kilitli)" : before != after ? " **değişti**" : "";
+      if (tunable.locked != true && tunable.synthetic == true && module.source == TuneModule.TRACES) mark += " (sentetik, uygulanmaz)";
       out.add('| ${tunable.title} (`${tunable.id}`) | $before | $after$mark | ${tunable.min}–${tunable.max}, ${tunable.step} |\n');
     }
     out.add('\n## Ölçütler\n\n| Ölçüt | Grup | Hedef | Önceki | Önerilen | Önerilen, doğrulama |\n| --- | --- | --- | --- | --- | --- |\n');

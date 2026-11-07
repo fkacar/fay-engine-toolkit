@@ -151,7 +151,7 @@ override public function keepsCell(isNear : (Float, Float) -> Bool) {
 
 Arazi modeli `assets/terrain/` altındaki FBX'ten gelir. FBX `.editor/terrain/` altında HMD'ye çevrilir ve repoya girmez. Üçgenler ağırlık merkezine göre hücrelere bölünür, kesilmez. Yükseklik 2 metre aralıkla hücrenin `.terrain.json` dosyasına yazılır ve modelin dört köşesini kapladığı kareler `TerrainCell.COVERED` olur. Oyun bu karelerde kendi arazisini çizmez, parçayı `WorldView.terrainChanged` içinde `state.surfaces` üzerinden çizer. Yeniden uygulamada her hücre eskisiyle karşılaştırılır, yalnızca farklı olanlar komuta girer. `.gitattributes` içinde `*.mesh` LFS'te olmalıdır. Heaps FBX'i X ekseninde aynalar, model binalar gibi bu kurala uyar.
 
-Yol bulma `NavWorld.findPath` ile yapılır. Hücre başına düğüm ızgarasıdır, saf Haxe'dir, yerel kütüphane gerektirmez. Hücreler ilk gerektiğinde okunur, yol ağı olmayan hücre yürünebilir sayılır. Recast'e geçilirse `NavWorld` ve `NavBaker` değişir, bileşenler etkilenmez.
+Yol bulma `NavWorld.findPath` ile yapılır. Hücre başına düğüm ızgarasıdır, saf Haxe'dir, yerel kütüphane gerektirmez. Hücreler ilk gerektiğinde okunur, yol ağı olmayan hücre yürünebilir sayılır. `NavWorld.findPathInto` yolu yeniden kullanılan bir tampona yazar, arama başına bellek ayırmaz. `NavSearch` bir aramayı parçalara böler (`begin`, düğüm ya da süre sınırıyla `step`, `result`): kare bütçesi uzun bir aramayı karelere yayabilir, bölünmüş arama aynı yolu bulur. `labelRegions` bağlı bölgeleri baştan (örneğin yüklemede) etiketler, ilk kullanımda değil. Recast'e geçilirse `NavWorld` ve `NavBaker` değişir, bileşenler etkilenmez.
 
 ## Görevler ve diyaloglar
 

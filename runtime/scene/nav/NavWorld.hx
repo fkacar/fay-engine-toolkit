@@ -10,9 +10,16 @@ typedef NavPoint = {
 
 // Dünya genelinde yol bulma. Hücreler ilk gerektiğinde okunur, bu yüzden yol yüklü olmayan
 // hücrelerden de geçebilir. Yol ağı olmayan hücre tamamen yürünebilir sayılır.
+// Arama bellek ayırmaz (findPathInto, NavSearch): aramanın tabloları düğüm başına diziler, geçerliliği arama numarasıyla
+// (damga); yığın, yolun düğümleri ve sonucun noktaları yeniden kullanılır. Diziler ilk aramada bir kez ayrılır (dünyanın
+// düğüm sayısı kadar). Bölge etiketleri de damgalı: yol ağı değişince (forget) dizi yeniden ayrılmaz; yüklemede bir kez
+// etiketlenebilir (labelRegions), yoksa ilk gerektiğinde.
+@:allow(scene.nav.NavSearch)
 class NavWorld {
-  static inline var MAX_EXPANSIONS = 80000;
+  public static inline var MAX_EXPANSIONS = 80000;
   static inline var SNAP_RINGS = 12;
+  // Yol tamponlarının kurulurken ayrılan nokta sayısı (düzleştirilmiş yollar çoğunlukla kısa; uzunu tamponu büyütür).
+  public static inline var PREALLOCATED_POINTS = 32;
   static inline var DIAGONAL = 1.41421356;
   static inline var SMOOTH_STRIDE = 3;
   static inline var SIGHT_SAMPLES = 4;
@@ -39,7 +46,9 @@ class NavWorld {
 
   public function forget(cell : Int) {
     cells.remove(cell);
-    regions = null;
+    regionEpoch++;
+    lastCell = -1;
+    lastData = null;
   }
 
   // Bağlı bölgeler: birbirine yolu olan yürünebilir düğüm kümeleri (A*'ın komşuluğuyla, köşe kuralı dahil). İlk gerektiğinde
@@ -47,13 +56,37 @@ class NavWorld {
   // cep, yayla) arama hedefe en yakın ulaşılabilir düğüme yönelir: o düğüm başlangıçtan bağımsızdır, yakın ve uzak katman
   // aynı yere varır; ulaşılamayan hedef aramaya bütün dünyayı açtırmaz (Anıt 1'in yaylası, 6 Kasım 2026).
   var regions : Null<haxe.ds.Vector<Int>>;
+  var regionStamps : Null<haxe.ds.Vector<Int>>;
+  var regionEpoch = 1;
   var nextRegion = 1;
+  var floodQueue : Null<haxe.ds.Vector<Int>>;
+  // Kendi araması (findPathInto, tek seferde) ve findPath'in tamponu.
+  var own : Null<NavSearch>;
+  var buffer : Array<NavPoint> = [];
+  // Son okunan hücre (komşu denetimlerinin çoğu aynı hücrede: tablo araması atlanır).
+  var lastCell = -1;
+  var lastData : Null<NavCell>;
+
+  // Bütün bölgeleri etiketler (yüklemede): ilk gerektiğinde etiketlemek bölgenin bütün düğümlerini o karede tarar (ana
+  // bölgede milisaniyeler). Bütün hücrelerin yol ağını okur.
+  public function labelRegions() {
+    for (node in 0...nodesX * nodesY) regionOf(node);
+  }
 
   function regionOf(node : Int) : Int {
     if (regions == null) {
-      regions = new haxe.ds.Vector(nodesX * nodesY);
-      for (i in 0...regions.length) regions[i] = 0;
-      nextRegion = 1;
+      var n = nodesX * nodesY;
+      regions = new haxe.ds.Vector(n);
+      regionStamps = new haxe.ds.Vector(n);
+      floodQueue = new haxe.ds.Vector(n);
+      for (i in 0...n) {
+        regions[i] = 0;
+        regionStamps[i] = 0;
+      }
+    }
+    if (regionStamps[node] != regionEpoch) {
+      regionStamps[node] = regionEpoch;
+      regions[node] = 0;
     }
     var label = regions[node];
     if (label != 0) return label;
@@ -61,9 +94,10 @@ class NavWorld {
       regions[node] = -1;
       return -1;
     }
-    var mark = nextRegion++, queue = [node], head = 0;
+    var mark = nextRegion++, queue = floodQueue, head = 0, tail = 0;
+    queue[tail++] = node;
     regions[node] = mark;
-    while (head < queue.length) {
+    while (head < tail) {
       var at = queue[head++], x = at % nodesX, y = Std.int(at / nodesX);
       for (dy in -1...2)
         for (dx in -1...2) {
@@ -72,9 +106,13 @@ class NavWorld {
           if (isBlocked(nx, ny)) continue;
           if (dx != 0 && dy != 0 && (isBlocked(x + dx, y) || isBlocked(x, y + dy))) continue;
           var next = ny * nodesX + nx;
+          if (regionStamps[next] != regionEpoch) {
+            regionStamps[next] = regionEpoch;
+            regions[next] = 0;
+          }
           if (regions[next] != 0) continue;
           regions[next] = mark;
-          queue.push(next);
+          queue[tail++] = next;
         }
     }
     return mark;
@@ -120,92 +158,34 @@ class NavWorld {
   }
 
   // Son nokta hedeftir. Hedefe yol yoksa (hedef başka bölgede) hedefe en yakın ulaşılabilir düğüme gider; o düğüm
-  // başlangıçtan bağımsızdır.
+  // başlangıçtan bağımsızdır. Yeni dizi döner (editör, ajan, uzak katman); birimler findPathInto ile ayırmadan arar.
   public function findPath(fromX : Float, fromY : Float, toX : Float, toY : Float) : Array<NavPoint> {
-    var goal : NavPoint = {x: toX, y: toY};
-    var start = nearestOpen(nodeX(fromX), nodeY(fromY));
-    var end = nearestOpen(nodeX(toX), nodeY(toY));
-    lastExpansions = 0;
-    lastReached = start >= 0 && end >= 0;
-    if (start < 0 || end < 0) return [goal];
-    var away = false;
-    var home = regionOf(start);
-    if (regionOf(end) != home) {
-      var reachable = nearestInRegion(end, home);
-      if (reachable >= 0) {
-        end = reachable;
-        away = true;
-      }
-    }
-    if (start == end) {
-      lastReached = !away;
-      return [away ? pointOf(end) : goal];
-    }
-
-    var open = new NodeHeap();
-    var cost = new Map<Int, Float>();
-    var came = new Map<Int, Int>();
-    var closed = new Map<Int, Bool>();
-    cost.set(start, 0);
-    open.push(start, estimate(start, end));
-    var best = start, bestLeft = estimate(start, end);
-    var expansions = 0;
-    while (open.length > 0 && expansions < MAX_EXPANSIONS) {
-      var node = open.pop();
-      if (node == end) {
-        best = end;
-        break;
-      }
-      if (closed.exists(node)) continue;
-      closed.set(node, true);
-      expansions++;
-      var left = estimate(node, end);
-      if (left < bestLeft) {
-        best = node;
-        bestLeft = left;
-      }
-      var x = node % nodesX, y = Std.int(node / nodesX);
-      var soFar = cost.get(node);
-      for (dy in -1...2)
-        for (dx in -1...2) {
-          if (dx == 0 && dy == 0) continue;
-          var nx = x + dx, ny = y + dy;
-          if (isBlocked(nx, ny)) continue;
-          // Köşeden geçilmez: engelin ucunu sıyırmasın.
-          if (dx != 0 && dy != 0 && (isBlocked(x + dx, y) || isBlocked(x, y + dy))) continue;
-          var next = ny * nodesX + nx;
-          var total = soFar + (dx != 0 && dy != 0 ? DIAGONAL : 1);
-          if (cost.exists(next) && cost.get(next) <= total) continue;
-          cost.set(next, total);
-          came.set(next, node);
-          open.push(next, total + estimate(next, end));
-        }
-    }
-    lastExpansions = expansions;
-    lastReached = best == end && !away;
-    var nodes = [best];
-    while (came.exists(nodes[nodes.length - 1])) nodes.push(came.get(nodes[nodes.length - 1]));
-    nodes.reverse();
-    var points = [for (node in smooth(nodes)) pointOf(node)];
-    if (best == end) points[points.length - 1] = !away && isWalkable(toX, toY) ? goal : pointOf(end);
-    return points;
+    var count = findPathInto(fromX, fromY, toX, toY, buffer);
+    return [for (i in 0...count) {x: buffer[i].x, y: buffer[i].y}];
   }
 
-  function smooth(nodes : Array<Int>) {
-    var result = [];
-    var anchor = 0, last = nodes.length - 1;
-    while (anchor < last) {
-      var reached = anchor + 1;
-      var probe = anchor + SMOOTH_STRIDE;
-      while (probe < last && isClear(nodes[anchor], nodes[probe])) {
-        reached = probe;
-        probe += SMOOTH_STRIDE;
-      }
-      if (isClear(nodes[anchor], nodes[last])) reached = last;
-      result.push(nodes[reached]);
-      anchor = reached;
-    }
-    return result;
+  // Yolu out'a yazar (noktaları yeniden kullanır, yalnızca dizi büyürken nokta ekler), nokta sayısını döner. out'un
+  // fazlası eski aramadan kalır: sayının ötesi okunmaz. Tek seferde (karelere bölünen arama: NavSearch).
+  public function findPathInto(fromX : Float, fromY : Float, toX : Float, toY : Float, out : Array<NavPoint>) : Int {
+    if (own == null) own = new NavSearch(this);
+    own.begin(fromX, fromY, toX, toY);
+    own.step(MAX_EXPANSIONS + 1, 0);
+    lastExpansions = own.expansions;
+    lastReached = own.reached;
+    return own.result(out);
+  }
+
+  // out'un i'nci noktası (x, y); döner: i + 1.
+  inline function write(out : Array<NavPoint>, i : Int, x : Float, y : Float) : Int {
+    if (i < out.length) {
+      out[i].x = x;
+      out[i].y = y;
+    } else out.push({x: x, y: y});
+    return i + 1;
+  }
+
+  inline function writeNode(out : Array<NavPoint>, i : Int, node : Int) : Int {
+    return write(out, i, world.left + (node % nodesX + 0.5) * step, world.bottom + (Std.int(node / nodesX) + 0.5) * step);
   }
 
   function isClear(from : Int, to : Int) {
@@ -237,7 +217,12 @@ class NavWorld {
   function isBlocked(x : Int, y : Int) {
     if (x < 0 || y < 0 || x >= nodesX || y >= nodesY) return true;
     var size = world.navResolution;
-    var data = cellData(world.id(Std.int(x / size), Std.int(y / size)));
+    var cell = world.id(Std.int(x / size), Std.int(y / size));
+    if (cell != lastCell) {
+      lastData = cellData(cell);
+      lastCell = cell;
+    }
+    var data = lastData;
     return data != null && data.isBlocked(x % size, y % size);
   }
 
@@ -267,6 +252,182 @@ class NavWorld {
   }
 }
 
+// Bir yol araması: durumu kendi dizilerinde, karelere bölünebilir (npc.PathQueue: NPC yürüme emirleri kare bütçesiyle).
+// begin, step (bitene kadar, istenirse bir süre sınırıyla), result. Bölünmüş arama bölünmemişle aynı yolu bulur. Arama
+// sürerken yol ağı değişirse (forget) sonuç eski ağa göredir. Diziler ilk aramada bir kez ayrılır.
+@:allow(scene.nav.NavWorld)
+class NavSearch {
+  public var done(default, null) = true;
+  public var expansions(default, null) = 0;
+  public var reached(default, null) = false;
+
+  var nav : NavWorld;
+  var costs : Null<haxe.ds.Vector<Float>>;
+  var came : Null<haxe.ds.Vector<Int>>;
+  var costStamps : Null<haxe.ds.Vector<Int>>;
+  var closedStamps : Null<haxe.ds.Vector<Int>>;
+  var search = 0;
+  var heap = new NodeHeap();
+  var trail : Array<Int> = [];
+  var smoothed : Array<Int> = [];
+  var start = -1;
+  var end = -1;
+  var best = -1;
+  var bestLeft = 0.;
+  var away = false;
+  var toX = 0.;
+  var toY = 0.;
+  // Arama gerekmedi: 1 hedefin kendisi, 2 hedefe en yakın ulaşılabilir düğüm.
+  var trivial = 0;
+
+  public function new(nav : NavWorld) {
+    this.nav = nav;
+  }
+
+  function prepare() {
+    if (costs != null) return;
+    var n = nav.nodesX * nav.nodesY;
+    costs = new haxe.ds.Vector(n);
+    came = new haxe.ds.Vector(n);
+    costStamps = new haxe.ds.Vector(n);
+    closedStamps = new haxe.ds.Vector(n);
+    for (i in 0...n) {
+      costStamps[i] = 0;
+      closedStamps[i] = 0;
+    }
+  }
+
+  // Son nokta hedeftir. Hedefe yol yoksa (hedef başka bölgede) hedefe en yakın ulaşılabilir düğüme gider; o düğüm
+  // başlangıçtan bağımsızdır.
+  public function begin(fromX : Float, fromY : Float, toX : Float, toY : Float) {
+    this.toX = toX;
+    this.toY = toY;
+    expansions = 0;
+    trivial = 0;
+    done = false;
+    start = nav.nearestOpen(nav.nodeX(fromX), nav.nodeY(fromY));
+    end = nav.nearestOpen(nav.nodeX(toX), nav.nodeY(toY));
+    reached = start >= 0 && end >= 0;
+    if (start < 0 || end < 0) {
+      trivial = 1;
+      done = true;
+      return;
+    }
+    away = false;
+    var home = nav.regionOf(start);
+    if (nav.regionOf(end) != home) {
+      var reachable = nav.nearestInRegion(end, home);
+      if (reachable >= 0) {
+        end = reachable;
+        away = true;
+      }
+    }
+    if (start == end) {
+      reached = !away;
+      trivial = away ? 2 : 1;
+      done = true;
+      return;
+    }
+    prepare();
+    search++;
+    heap.clear();
+    costs[start] = 0;
+    costStamps[start] = search;
+    came[start] = -1;
+    heap.push(start, nav.estimate(start, end));
+    best = start;
+    bestLeft = nav.estimate(start, end);
+  }
+
+  // Düğüm açar: en çok maxExpansions kadar, deadline (haxe.Timer.stamp, sn; 0 sınırsız) gelince durur; her çağrıda en az
+  // bir düğüm. Döner: arama bitti mi.
+  public function step(maxExpansions : Int, deadline : Float) : Bool {
+    if (done) return true;
+    var opened = 0, nodesX = nav.nodesX;
+    while (heap.length > 0 && expansions < NavWorld.MAX_EXPANSIONS) {
+      if (opened >= maxExpansions || (deadline > 0 && opened > 0 && haxe.Timer.stamp() >= deadline)) return false;
+      var node = heap.pop();
+      if (node == end) {
+        best = end;
+        break;
+      }
+      if (closedStamps[node] == search) continue;
+      closedStamps[node] = search;
+      expansions++;
+      opened++;
+      var left = nav.estimate(node, end);
+      if (left < bestLeft) {
+        best = node;
+        bestLeft = left;
+      }
+      var x = node % nodesX, y = Std.int(node / nodesX);
+      var soFar = costs[node];
+      for (dy in -1...2)
+        for (dx in -1...2) {
+          if (dx == 0 && dy == 0) continue;
+          var nx = x + dx, ny = y + dy;
+          if (nav.isBlocked(nx, ny)) continue;
+          // Köşeden geçilmez: engelin ucunu sıyırmasın.
+          if (dx != 0 && dy != 0 && (nav.isBlocked(x + dx, y) || nav.isBlocked(x, y + dy))) continue;
+          var next = ny * nodesX + nx;
+          var total = soFar + (dx != 0 && dy != 0 ? NavWorld.DIAGONAL : 1);
+          if (costStamps[next] == search && costs[next] <= total) continue;
+          costs[next] = total;
+          costStamps[next] = search;
+          came[next] = node;
+          heap.push(next, total + nav.estimate(next, end));
+        }
+    }
+    done = true;
+    reached = best == end && !away;
+    return true;
+  }
+
+  // Bitmiş aramanın yolu out'a (NavWorld.findPathInto gibi), nokta sayısı.
+  public function result(out : Array<NavPoint>) : Int {
+    if (trivial == 1) return nav.write(out, 0, toX, toY);
+    if (trivial == 2) return nav.writeNode(out, 0, end);
+    // Yolun düğümleri sondan başa (trail), sonra başından düzleştirilir.
+    var length = 0, at = best;
+    while (true) {
+      if (length < trail.length) trail[length] = at;
+      else trail.push(at);
+      length++;
+      if (at == start) break;
+      at = came[at];
+    }
+    var count = smooth(length);
+    var written = 0;
+    for (i in 0...count) written = nav.writeNode(out, written, smoothed[i]);
+    if (best == end && written > 0) {
+      if (!away && nav.isWalkable(toX, toY)) nav.write(out, written - 1, toX, toY);
+      else nav.writeNode(out, written - 1, end);
+    }
+    return written;
+  }
+
+  // trail sondan başa (trail[length - 1] başlangıç): düzleştirilmiş düğümler smoothed'a (başlangıç hariç), sayısı döner.
+  function smooth(length : Int) : Int {
+    inline function nodeAt(i : Int) return trail[length - 1 - i];
+    var count = 0;
+    var anchor = 0, last = length - 1;
+    while (anchor < last) {
+      var reached = anchor + 1;
+      var probe = anchor + NavWorld.SMOOTH_STRIDE;
+      while (probe < last && nav.isClear(nodeAt(anchor), nodeAt(probe))) {
+        reached = probe;
+        probe += NavWorld.SMOOTH_STRIDE;
+      }
+      if (nav.isClear(nodeAt(anchor), nodeAt(last))) reached = last;
+      if (count < smoothed.length) smoothed[count] = nodeAt(reached);
+      else smoothed.push(nodeAt(reached));
+      count++;
+      anchor = reached;
+    }
+    return count;
+  }
+}
+
 private class NodeHeap {
   public var length(default, null) = 0;
 
@@ -275,10 +436,19 @@ private class NodeHeap {
 
   public function new() {}
 
+  public function clear() {
+    length = 0;
+  }
+
   public function push(node : Int, score : Float) {
     var i = length++;
-    nodes[i] = node;
-    scores[i] = score;
+    if (i < nodes.length) {
+      nodes[i] = node;
+      scores[i] = score;
+    } else {
+      nodes.push(node);
+      scores.push(score);
+    }
     while (i > 0) {
       var parent = (i - 1) >> 1;
       if (scores[parent] <= scores[i]) break;

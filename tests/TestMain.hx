@@ -1497,6 +1497,19 @@ class TestMain {
     var lockedReport = scene.tune.TuneReport.write(new scene.tune.Tuner(module(5)), locked, "deneme");
     check(lockedReport.indexOf("Kilitli ayarların etkisi") > 0, "kilitli ayarın etkisi raporda");
     check(found.front.length >= 1 && found.front[0].valid, "kalite ve performans sınırı");
+    // İzler olsa da senaryosu sentetik ayar (Tunable.synthetic): raporda yazılır, uygulanmaz (bugünkü değerinde kalır).
+    var mixed = module();
+    mixed.tunables[1].synthetic = true;
+    var mixedFound = new scene.tune.Tuner(mixed).search(500);
+    var syntheticReport = scene.tune.TuneReport.write(new scene.tune.Tuner(mixed), mixedFound, "deneme");
+    var synthApplied = mixed.applied(mixedFound.best.config);
+    check(synthApplied.get("x") == 0 && synthApplied.get("y") == 0 && syntheticReport.indexOf("Kaynak: sentetik") > 0, "kaynak sentetikse hiçbir öneri uygulanmaz");
+    mixed.source = scene.tune.TuneModule.TRACES;
+    var traceApplied = mixed.applied(mixedFound.best.config);
+    var traceReport = scene.tune.TuneReport.write(new scene.tune.Tuner(mixed), mixedFound, "deneme");
+    check(traceApplied.get("x") == 3 && traceApplied.get("y") == 0 && traceReport.indexOf("önerileri yazılır, uygulanmaz: `y`") > 0
+      && traceReport.indexOf("(sentetik, uygulanmaz)") > 0 && mixed.syntheticTunables().length == 1,
+      'kaynak iz: sentetik işaretli ayar uygulanmaz, rapor söyler (${traceApplied})');
     // Dışarıdan tohum çalıştırıcısı (işçi süreç havuzu gibi): tohumlar ters sırada çalışsa da sonuç tohum sırasıyla.
     var outside = new scene.tune.Tuner(module());
     var plain = module();
@@ -1927,6 +1940,118 @@ class TestMain {
     var shapes = [NavShapes.box2(0, gap ? -6 : 0, 1, gap ? 4 : 10)];
     for (cell in world.cells()) files.set(world.path(cell, WorldData.NAV_SUFFIX), NavBaker.bake(cell, world, state.terrain, shapes).write());
     return {world: world, state: state, files: files, nav: new NavWorld(state)};
+  }
+
+  // Eski yol bulmanın kopyası (tablolarla, her aramada ayırarak; 7 Kasım 2026'dan önceki NavWorld.findPath): bellek
+  // ayırmayan arama aynı yolları bulmalı. Ortak yardımcılar (bölge, en yakın açık düğüm, düzleştirme bakışı) NavWorld'ün.
+  static function referencePath(nav : NavWorld, fromX : Float, fromY : Float, toX : Float, toY : Float) : Array<scene.nav.NavWorld.NavPoint> @:privateAccess {
+    var goal : scene.nav.NavWorld.NavPoint = {x: toX, y: toY};
+    var start = nav.nearestOpen(nav.nodeX(fromX), nav.nodeY(fromY)), end = nav.nearestOpen(nav.nodeX(toX), nav.nodeY(toY));
+    if (start < 0 || end < 0) return [goal];
+    var away = false, home = nav.regionOf(start);
+    if (nav.regionOf(end) != home) {
+      var reachable = nav.nearestInRegion(end, home);
+      if (reachable >= 0) {
+        end = reachable;
+        away = true;
+      }
+    }
+    if (start == end) return [away ? nav.pointOf(end) : goal];
+    var open = new ReferenceHeap(), cost = new Map<Int, Float>(), came = new Map<Int, Int>(), closed = new Map<Int, Bool>();
+    cost.set(start, 0);
+    open.push(start, nav.estimate(start, end));
+    var best = start, bestLeft = nav.estimate(start, end), expansions = 0, nodesX = nav.nodesX;
+    while (open.length > 0 && expansions < NavWorld.MAX_EXPANSIONS) {
+      var node = open.pop();
+      if (node == end) {
+        best = end;
+        break;
+      }
+      if (closed.exists(node)) continue;
+      closed.set(node, true);
+      expansions++;
+      var left = nav.estimate(node, end);
+      if (left < bestLeft) {
+        best = node;
+        bestLeft = left;
+      }
+      var x = node % nodesX, y = Std.int(node / nodesX), soFar = cost.get(node);
+      for (dy in -1...2)
+        for (dx in -1...2) {
+          if (dx == 0 && dy == 0) continue;
+          var nx = x + dx, ny = y + dy;
+          if (nav.isBlocked(nx, ny)) continue;
+          if (dx != 0 && dy != 0 && (nav.isBlocked(x + dx, y) || nav.isBlocked(x, y + dy))) continue;
+          var next = ny * nodesX + nx, total = soFar + (dx != 0 && dy != 0 ? NavWorld.DIAGONAL : 1);
+          if (cost.exists(next) && cost.get(next) <= total) continue;
+          cost.set(next, total);
+          came.set(next, node);
+          open.push(next, total + nav.estimate(next, end));
+        }
+    }
+    var nodes = [best];
+    while (came.exists(nodes[nodes.length - 1])) nodes.push(came.get(nodes[nodes.length - 1]));
+    nodes.reverse();
+    var result = [], anchor = 0, last = nodes.length - 1;
+    while (anchor < last) {
+      var reached = anchor + 1, probe = anchor + NavWorld.SMOOTH_STRIDE;
+      while (probe < last && nav.isClear(nodes[anchor], nodes[probe])) {
+        reached = probe;
+        probe += NavWorld.SMOOTH_STRIDE;
+      }
+      if (nav.isClear(nodes[anchor], nodes[last])) reached = last;
+      result.push(nodes[reached]);
+      anchor = reached;
+    }
+    var points = [for (node in result) nav.pointOf(node)];
+    if (best == end) points[points.length - 1] = !away && nav.isWalkable(toX, toY) ? goal : nav.pointOf(end);
+    return points;
+  }
+
+  // Bellek ayırmayan yol bulma eskisiyle aynı yolları bulur (rastgele engelli dünya, rastgele aramalar, kapalı cepler dahil).
+  static function testNavEquivalence() {
+    var world = new WorldData("world", 3, 3, 40, 2, []);
+    world.navResolution = 20;
+    var files = new Map<String, String>();
+    var state = new WorldState(world, path -> files.get(path));
+    state.loadAllTerrain();
+    var rnd = new scene.save.Random(77), shapes = [];
+    for (_ in 0...60) shapes.push(NavShapes.box2(world.left + rnd.rand() * 120, world.bottom + rnd.rand() * 120, 1 + rnd.rand() * 8, 1 + rnd.rand() * 8));
+    // Kapalı cep: dört duvar.
+    shapes.push(NavShapes.box2(world.left + 90, world.bottom + 90, 12, 1));
+    shapes.push(NavShapes.box2(world.left + 90, world.bottom + 102, 12, 1));
+    shapes.push(NavShapes.box2(world.left + 84, world.bottom + 96, 1, 12));
+    shapes.push(NavShapes.box2(world.left + 96, world.bottom + 96, 1, 12));
+    for (cell in world.cells()) files.set(world.path(cell, WorldData.NAV_SUFFIX), NavBaker.bake(cell, world, state.terrain, shapes).write());
+    var nav = new NavWorld(state), same = 0, total = 200, first = "";
+    var buffer : Array<scene.nav.NavWorld.NavPoint> = [], slicedBuffer : Array<scene.nav.NavWorld.NavPoint> = [];
+    var sliced = new scene.nav.NavWorld.NavSearch(nav), slicedRuns = 0;
+    for (i in 0...total) {
+      var fx = world.left + rnd.rand() * 120, fy = world.bottom + rnd.rand() * 120, tx = world.left + rnd.rand() * 120, ty = world.bottom + rnd.rand() * 120;
+      if (i % 10 == 0) {
+        tx = world.left + 90;
+        ty = world.bottom + 96;
+      }
+      var expected = referencePath(nav, fx, fy, tx, ty), found = nav.findPath(fx, fy, tx, ty);
+      var count = nav.findPathInto(fx, fy, tx, ty, buffer);
+      // Karelere bölünmüş arama (her adımda bir düğüm) aynı yolu bulur.
+      sliced.begin(fx, fy, tx, ty);
+      var rounds = 0;
+      while (!sliced.step(1, 0)) rounds++;
+      var slicedCount = sliced.result(slicedBuffer);
+      if (rounds > 0) slicedRuns++;
+      var ok = expected.length == found.length && count == found.length && slicedCount == count;
+      if (ok) for (k in 0...count) if (slicedBuffer[k].x != buffer[k].x || slicedBuffer[k].y != buffer[k].y) ok = false;
+      if (ok) for (k in 0...found.length)
+        if (Math.abs(expected[k].x - found[k].x) > 1e-9 || Math.abs(expected[k].y - found[k].y) > 1e-9 || buffer[k].x != found[k].x || buffer[k].y != found[k].y) ok = false;
+      if (ok) same++;
+      else if (first == "") first = '$i: ${expected.length} / ${found.length} / $count';
+    }
+    equals(same, total, 'bellek ayırmayan yol bulma eskisiyle aynı yolları bulmalı, bölünmüş arama da (ilk fark: $first)');
+    check(slicedRuns > total / 2, 'bölünmüş aramaların çoğu birden çok adım sürdü ($slicedRuns)');
+    // Yol ağı değişince (forget) bölgeler yeniden etiketlenir: önceden kapalı cep açılınca içine yol bulunur.
+    nav.forget(0);
+    check(nav.findPath(world.left + 10, world.bottom + 10, world.left + 20, world.bottom + 20).length > 0, "unutulan hücreden sonra yol bulunmalı");
   }
 
   static function testNav() {
@@ -2645,6 +2770,7 @@ class TestMain {
     testNav();
     testTerrainModels();
     testNavRules();
+    testNavEquivalence();
     testSurfaces();
     testDataTables();
     testWorldDelta();
@@ -2682,5 +2808,52 @@ class FakeStore implements scene.story.GameState.ItemStore {
     var total = (depot.exists(item) ? depot.get(item) : 0) + amount;
     if (total <= 0) depot.remove(item) else depot.set(item, total);
     state.sync(depot.copy());
+  }
+}
+
+// Eski yol bulmanın yığını (NavWorld'ün yığınıyla aynı sıralama: eşit puanlarda aynı düğüm çıkar).
+private class ReferenceHeap {
+  public var length(default, null) = 0;
+
+  var nodes : Array<Int> = [];
+  var scores : Array<Float> = [];
+
+  public function new() {}
+
+  public function push(node : Int, score : Float) {
+    var i = length++;
+    nodes[i] = node;
+    scores[i] = score;
+    while (i > 0) {
+      var parent = (i - 1) >> 1;
+      if (scores[parent] <= scores[i]) break;
+      swap(i, parent);
+      i = parent;
+    }
+  }
+
+  public function pop() : Int {
+    var top = nodes[0];
+    length--;
+    nodes[0] = nodes[length];
+    scores[0] = scores[length];
+    var i = 0;
+    while (true) {
+      var left = i * 2 + 1, right = left + 1, smallest = i;
+      if (left < length && scores[left] < scores[smallest]) smallest = left;
+      if (right < length && scores[right] < scores[smallest]) smallest = right;
+      if (smallest == i) break;
+      swap(i, smallest);
+      i = smallest;
+    }
+    return top;
+  }
+
+  function swap(a : Int, b : Int) {
+    var node = nodes[a], score = scores[a];
+    nodes[a] = nodes[b];
+    scores[a] = scores[b];
+    nodes[b] = node;
+    scores[b] = score;
   }
 }

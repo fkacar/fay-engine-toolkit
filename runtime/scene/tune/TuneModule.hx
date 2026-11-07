@@ -4,7 +4,9 @@ package scene.tune;
 //   Ayar: aralık ve adım; kilitli ayar (tasarım kararı) aramada değişmez, yalnızca etkisi raporlanır.
 //   Ölçüt: kalite ya da performans grubunda; amaç en yüksek, en düşük ya da bant; sert sınır aşılırsa kombinasyon elenir.
 //   Senaryo: ayarlar ve tohumla çalışır, ölçüm değerlerini döner. Aynı ayar ve tohum aynı sonucu vermeli.
-typedef Tunable = {id : String, title : String, min : Float, max : Float, step : Float, value : Float, ?locked : Bool};
+//   synthetic: izler olsa da bu ayarın ölçütlerini süren senaryo sentetik (örneğin kalabalık izi yok); önerisi raporda
+//   yazılır, uygulanmaz.
+typedef Tunable = {id : String, title : String, min : Float, max : Float, step : Float, value : Float, ?locked : Bool, ?synthetic : Bool};
 
 enum Goal {
   // Değer büyüdükçe iyi; scale değerinde tam puan.
@@ -50,6 +52,21 @@ class TuneModule {
     this.tunables = tunables;
     this.metrics = metrics;
     this.run = run;
+  }
+
+  // Önerisi uygulanabilir mi: kaynak iz, ayar kilitli değil ve sentetik işaretli değil.
+  public function applicable(tunable : Tunable) : Bool {
+    return source == TRACES && tunable.locked != true && tunable.synthetic != true;
+  }
+
+  // Uygulanacak değerler: uygulanamayan ayar bugünkü değerinde kalır.
+  public function applied(config : Map<String, Float>) : Map<String, Float> {
+    return [for (tunable in tunables) tunable.id => applicable(tunable) && config.exists(tunable.id) ? config.get(tunable.id) : tunable.value];
+  }
+
+  // Kaynak iz olsa da senaryosu sentetik olan, kilitli olmayan ayarlar.
+  public function syntheticTunables() : Array<Tunable> {
+    return [for (tunable in tunables) if (tunable.locked != true && tunable.synthetic == true) tunable];
   }
 
   public function current() : Map<String, Float> {
