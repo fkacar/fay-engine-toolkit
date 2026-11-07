@@ -7,7 +7,9 @@ import scene.Entity;
 class Story {
   public var state(default, null) = new GameState();
   // Fraksiyon ilişkisi: oyun bağlar (başlangıç ilişkisi ve ölçek oyunun tablosunda); bağlı değilse kayıttaki değer.
-  public var standingOf : Null<String -> Int>;
+  public var standingOf(default, set) : Null<String -> Int>;
+  // İlişkinin değişimi: oyun bağlar (ölçeğe yazarken uyulur); bağlı değilse kayda eklenir.
+  public var standingChange : Null<(String, Int) -> Void>;
   public var dialog(default, null) : Null<DialogRunner>;
   public var messages(default, null) : Array<String> = [];
   // Verilirse her adım kaydedilir: editörden açılan oyun ve görev testi kullanır.
@@ -72,7 +74,13 @@ class Story {
 
   // Oyuncunun fraksiyonla ilişkisi (diyaloğun İlişki koşulu, tetikleyicinin ilişki koşulu).
   public function standing(faction : String) : Int {
-    return standingOf != null ? standingOf(faction) : state.standingWith(faction);
+    return state.relation(faction);
+  }
+
+  // İlişkiyi değiştirir (Fraksiyon ilişkisi eylemi): oyunun kuralıyla, bağlı değilse kayda eklenir.
+  public function changeStanding(faction : String, amount : Int) {
+    if (standingChange != null) standingChange(faction, amount);
+    else state.changeStanding(faction, amount);
   }
 
   public function closeDialogIfFinished() {
@@ -90,6 +98,12 @@ class Story {
       dialogs.set(id, text == null ? null : Dialog.read(id, text));
     }
     return dialogs.get(id);
+  }
+
+  // Oyunun değeri durumda da geçerli: "iliski" değişikliği ve GameState.relation aynı değeri verir.
+  function set_standingOf(value : Null<String -> Int>) {
+    state.relationOf = value;
+    return standingOf = value;
   }
 
   function set_log(value : Null<StoryLog>) {

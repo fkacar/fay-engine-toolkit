@@ -2491,6 +2491,15 @@ class TestMain {
     talk.standingOf = faction -> faction == "kasaba" ? -10 : 0;
     talk.startDialog("selam");
     equals(talk.dialog.text, "Defol.", "ilişki koşulu: oyunun verdiği ilişki okunur (kayıttakinin yerine)");
+    // "iliski" değişikliğinin değeri ve GameState.relation da oyunun değeri (olay kaydı, günlük, F3 ve ajan aynısını görür).
+    var reported = [];
+    talk.state.watch((kind, name, value) -> if (kind == "iliski") reported.push('$name $value'));
+    var start = 50;
+    talk.standingOf = faction -> faction == "kasaba" ? start + talk.state.standingWith(faction) : 0;
+    talk.state.changeStanding("kasaba", 5);
+    equals(reported.join(","), "kasaba 85", "ilişki değişikliği oyunun değerini bildirir (başlangıç 50 + kayıtta 35)");
+    equals(talk.state.relation("kasaba"), 85, "GameState.relation oyunun değeri");
+    equals(talk.state.standingWith("kasaba"), 35, "kayıt değişimi tutar");
     equals(Dialog.read("selam", greet.write()).write(), greet.write(), "ilişki koşullu diyalog dosyası kararlı");
 
     story.startDialog("yok");

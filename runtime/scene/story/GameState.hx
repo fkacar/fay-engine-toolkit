@@ -81,14 +81,23 @@ class GameState {
     changed("degisken", name, value);
   }
 
+  // Kayıttaki değişim (kaydın biçimi). Oyunun kullandığı ilişki relation'dır.
   public function standingWith(faction : String) {
     return standing.exists(faction) ? standing.get(faction) : 0;
+  }
+
+  // İlişkinin oyundaki değeri: oyun bağlar (Story.standingOf: başlangıç ilişkisi ile değişim, ölçekte); bağlı değilse
+  // kayıttaki değişim. "iliski" değişikliğinin değeri de budur (olay kaydı, günlük, F3 ve ajan aynı değeri görür).
+  public var relationOf : Null<String -> Int>;
+
+  public function relation(faction : String) : Int {
+    return relationOf != null ? relationOf(faction) : standingWith(faction);
   }
 
   public function changeStanding(faction : String, amount : Int) {
     standing.set(faction, standingWith(faction) + amount);
     revision++;
-    changed("iliski", faction, standingWith(faction));
+    changed("iliski", faction, relation(faction));
   }
 }
 
