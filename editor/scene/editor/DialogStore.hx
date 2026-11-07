@@ -13,6 +13,8 @@ class DialogStore {
   public var dialogs(default, null) = new Map<String, Dialog>();
   // Koşul düğümündeki eşya bu tablodan seçilir; satır silinirken diyaloglar da taranır. Oyun belirler.
   public var itemTable : Null<String>;
+  // İlişki koşulunun fraksiyon tablosu (oyun bağlar).
+  public var factionTable : Null<String>;
 
   var disk = new Map<String, String>();
   var editor : Null<Editor>;

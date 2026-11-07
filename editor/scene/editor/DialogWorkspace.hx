@@ -620,15 +620,18 @@ class DialogWorkspace {
 
   function drawCondition(node : DialogNode) {
     var id = node.id;
-    var isItem = node.kind == Dialog.ITEM;
-    if (ImGui.radioButton("Değişken", !isItem)) change("Koşul türü", d -> d.node(id).kind = Dialog.FLAG);
+    var isItem = node.kind == Dialog.ITEM, isStanding = node.kind == Dialog.STANDING;
+    if (ImGui.radioButton("Değişken", !isItem && !isStanding)) change("Koşul türü", d -> d.node(id).kind = Dialog.FLAG);
     ImGui.sameLine();
     if (ImGui.radioButton("Eşya", isItem)) change("Koşul türü", d -> d.node(id).kind = Dialog.ITEM);
+    ImGui.sameLine();
+    if (ImGui.radioButton("İlişki", isStanding)) change("Koşul türü", d -> d.node(id).kind = Dialog.STANDING);
     var name = node.name == null ? "" : node.name;
-    var items = editor.dialogs.itemTable == null ? null : editor.data.tables.get(editor.dialogs.itemTable);
-    if (isItem && items != null) {
+    var tableName = isItem ? editor.dialogs.itemTable : isStanding ? editor.dialogs.factionTable : null;
+    var items = tableName == null ? null : editor.data.tables.get(tableName);
+    if ((isItem || isStanding) && items != null) {
       var preview = name == "" ? "(seç)" : items.find(name) == null ? '$name (bulunamadı)' : items.label(name);
-      if (ImGui.beginCombo("Eşya", preview)) {
+      if (ImGui.beginCombo(isItem ? "Eşya" : "Fraksiyon", preview)) {
         for (row in items.ids()) {
           var chosen = row == name;
           if (ImGui.selectable(items.label(row), chosen)) change("Koşul", d -> d.node(id).name = row);
@@ -637,7 +640,7 @@ class DialogWorkspace {
       }
     } else {
       focusField();
-      if (ImGui.inputText(isItem ? "Eşya kimliği" : "Değişken adı", name)) node.name = name;
+      if (ImGui.inputText(isItem ? "Eşya kimliği" : isStanding ? "Fraksiyon kimliği" : "Değişken adı", name)) node.name = name;
       track("Koşul");
     }
     var value : Int = node.value == null ? 1 : node.value;
@@ -762,7 +765,7 @@ class DialogWorkspace {
   static function conditionText(node : DialogNode) {
     var name = blank(node.name) ? "(adsız)" : node.name;
     var value = node.value == null ? 1 : node.value;
-    return node.kind == Dialog.ITEM ? 'Eşya $name en az $value' : '$name en az $value';
+    return node.kind == Dialog.ITEM ? 'Eşya $name en az $value' : node.kind == Dialog.STANDING ? 'İlişki $name en az $value' : '$name en az $value';
   }
 
 

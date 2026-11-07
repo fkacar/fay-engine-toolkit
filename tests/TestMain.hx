@@ -2473,6 +2473,26 @@ class TestMain {
     story.dialog.next();
     check(story.dialog.finished, "bitiş");
 
+    // İlişki koşulu (docs/NPC_DAVRANIS_PLANI.md, 1. adım): değeri oyun verir (Story.standingOf: başlangıç ilişkisi ve
+    // ölçek oyunun tablosunda); bağlı değilse kayıttaki değer.
+    var greet = new Dialog("selam", "Selam");
+    greet.nodes.push({id: 1, type: Dialog.START, x: 0, y: 0, next: 2});
+    greet.nodes.push({id: 2, type: Dialog.CONDITION, x: 0, y: 0, kind: Dialog.STANDING, name: "kasaba", value: 25, yes: 3, no: 4});
+    greet.nodes.push({id: 3, type: Dialog.LINE, x: 0, y: 0, speaker: "Bekçi", text: "Hoş geldin.", next: 5});
+    greet.nodes.push({id: 4, type: Dialog.LINE, x: 0, y: 0, speaker: "Bekçi", text: "Defol.", next: 5});
+    greet.nodes.push({id: 5, type: Dialog.END, x: 0, y: 0});
+    var greetFiles = ["data/dialogs/selam.dialog.json" => greet.write()];
+    var talk = new Story(path -> greetFiles.get(path));
+    talk.startDialog("selam");
+    equals(talk.dialog.text, "Defol.", "ilişki koşulu: kayıtta ilişki yok (0), hayır dalı");
+    talk.state.changeStanding("kasaba", 30);
+    talk.startDialog("selam");
+    equals(talk.dialog.text, "Hoş geldin.", "ilişki koşulu: kayıttaki ilişki 30, evet dalı");
+    talk.standingOf = faction -> faction == "kasaba" ? -10 : 0;
+    talk.startDialog("selam");
+    equals(talk.dialog.text, "Defol.", "ilişki koşulu: oyunun verdiği ilişki okunur (kayıttakinin yerine)");
+    equals(Dialog.read("selam", greet.write()).write(), greet.write(), "ilişki koşullu diyalog dosyası kararlı");
+
     story.startDialog("yok");
     check(story.dialog == null || story.dialog.finished, "olmayan diyalog açılmamalı");
     equals(story.messages[story.messages.length - 1], "Diyalog bulunamadı: yok", "olmayan diyalog bildirilmeli");

@@ -6,6 +6,8 @@ import scene.Entity;
 // eylem bileşenleri taşır; olay veya giriş olunca `fire` çağrılır.
 class Story {
   public var state(default, null) = new GameState();
+  // Fraksiyon ilişkisi: oyun bağlar (başlangıç ilişkisi ve ölçek oyunun tablosunda); bağlı değilse kayıttaki değer.
+  public var standingOf : Null<String -> Int>;
   public var dialog(default, null) : Null<DialogRunner>;
   public var messages(default, null) : Array<String> = [];
   // Verilirse her adım kaydedilir: editörden açılan oyun ve görev testi kullanır.
@@ -66,6 +68,11 @@ class Story {
     }
     dialog = new DialogRunner(data, this);
     if (dialog.finished) dialog = null;
+  }
+
+  // Oyuncunun fraksiyonla ilişkisi (diyaloğun İlişki koşulu, tetikleyicinin ilişki koşulu).
+  public function standing(faction : String) : Int {
+    return standingOf != null ? standingOf(faction) : state.standingWith(faction);
   }
 
   public function closeDialogIfFinished() {

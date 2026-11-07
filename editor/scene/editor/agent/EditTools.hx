@@ -66,7 +66,7 @@ class EditTools {
       addColumns: {type: "array", items: {type: "object"}}, removeColumns: {type: "array", items: {type: "string"}},
       delete: {type: "array", items: {type: "string"}}, label: {type: "string"}, expectedRevision: revision,
     }, editTable, false, ["table"]);
-    tool("edit_dialog", "Bir diyaloğu değiştirir veya oluşturur (create true). nodes: düğümleri kimliğe göre ekler veya günceller (diyalog dosyasındaki biçim: id, type baslangic|satir|secenek|kosul|olay|bitis, speaker, text, next, choices [{text, next}], kind degisken|esya, name, value, yes, no, event). remove: silinecek düğümler. arrange: düğümleri akışa göre dizer.", {
+    tool("edit_dialog", "Bir diyaloğu değiştirir veya oluşturur (create true). nodes: düğümleri kimliğe göre ekler veya günceller (diyalog dosyasındaki biçim: id, type baslangic|satir|secenek|kosul|olay|bitis, speaker, text, next, choices [{text, next}], kind degisken|esya|iliski (fraksiyonla ilişki, en az; ölçek oyunun ayarı), name, value, yes, no, event). remove: silinecek düğümler. arrange: düğümleri akışa göre dizer.", {
       id: {type: "string"}, title: {type: "string"}, create: {type: "boolean"}, nodes: {type: "array", items: {type: "object"}},
       remove: {type: "array", items: {type: "integer"}}, arrange: {type: "boolean"}, label: {type: "string"}, expectedRevision: revision,
     }, editDialog, false, ["id"]);

@@ -591,7 +591,7 @@ class ContextTools {
           case Dialog.CHOICES:
             item.choices = [for (choice in (node.choices == null ? [] : node.choices)) {text: choice.text, next: choice.next}];
           case Dialog.CONDITION:
-            item.condition = '${node.kind == Dialog.ITEM ? "eşya" : "değişken"} ${node.name} en az ${node.value}';
+            item.condition = '${node.kind == Dialog.ITEM ? "eşya" : node.kind == Dialog.STANDING ? "ilişki" : "değişken"} ${node.name} en az ${node.value}';
             item.yes = node.yes;
             item.no = node.no;
           case Dialog.EVENT:

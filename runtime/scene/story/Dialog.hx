@@ -36,6 +36,8 @@ class Dialog {
   public static inline var END = "bitis";
   public static inline var FLAG = "degisken";
   public static inline var ITEM = "esya";
+  // Fraksiyon ilişkisi (en az): değeri oyun verir (Story.standing).
+  public static inline var STANDING = "iliski";
 
   public var id(default, null) : String;
   public var title : String;

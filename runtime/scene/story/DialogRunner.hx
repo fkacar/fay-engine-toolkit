@@ -54,7 +54,8 @@ class DialogRunner {
           if (story.log != null) story.log.add("secenekler", {dialog: dialog.id, node: current.id, choices: choices});
           return;
         case Dialog.CONDITION:
-          var value = current.kind == Dialog.ITEM ? story.state.count(current.name) : story.state.flag(current.name);
+          var value = current.kind == Dialog.ITEM ? story.state.count(current.name)
+            : current.kind == Dialog.STANDING ? story.standing(current.name) : story.state.flag(current.name);
           current = dialog.node(value >= (current.value == null ? 1 : current.value) ? current.yes : current.no);
         case Dialog.EVENT:
           var event = current.event;
