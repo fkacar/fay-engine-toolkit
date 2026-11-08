@@ -76,7 +76,7 @@ class SceneDocument {
     try {
       if (world != null) written = world.save();
       else written = saveScene();
-      written += editor.data.save() + editor.dialogs.save();
+      written += editor.data.save() + editor.translations.save() + editor.dialogs.save();
     } catch (e : Dynamic) {
       editor.show('Kaydedilemedi: $e', true);
       return false;
@@ -143,7 +143,7 @@ class SceneDocument {
   // olanlar kaydederken birleşir.
   public function checkDisk() {
     var reloaded = world != null ? world.checkDisk() : checkScene();
-    reloaded = reloaded.concat(editor.data.checkDisk()).concat(editor.dialogs.checkDisk());
+    reloaded = reloaded.concat(editor.data.checkDisk()).concat(editor.translations.checkDisk()).concat(editor.dialogs.checkDisk());
     if (reloaded.length > 0) {
       validate();
       editor.show(reloaded.length == 1 ? 'Dışarıda değişti, yeniden yüklendi: ${reloaded[0]}' : 'Dışarıda değişti, yeniden yüklendi: ${reloaded.length} dosya');
@@ -157,7 +157,7 @@ class SceneDocument {
   public function unsavedFiles() : Array<String> {
     var files = world != null ? world.unsavedFiles() : sceneBase == null && scene.entities.length == 0
       || sceneBase != null && SceneFormat.write(scene.toData()) == canonical(sceneBase) ? [] : [path];
-    return files.concat(editor.data.unsavedFiles()).concat(editor.dialogs.unsavedFiles());
+    return files.concat(editor.data.unsavedFiles()).concat(editor.translations.unsavedFiles()).concat(editor.dialogs.unsavedFiles());
   }
 
   // Bir dosyanın editördeki hali: kaydedilirse yazılacak metin.
@@ -165,6 +165,7 @@ class SceneDocument {
     if (world != null && StringTools.startsWith(file, "res/world/")) return world.editorText(file);
     if (world == null && file == path) return SceneFormat.write(scene.toData());
     var table = editor.data.editorText(file);
+    if (table == null) table = editor.translations.editorText(file);
     return table != null ? table : editor.dialogs.editorText(file);
   }
 
@@ -371,6 +372,7 @@ class SceneDocument {
     editor.commands.clear();
     // Kaydedilmeden bırakılan tablo değişiklikleri de atılır, geçmişle birlikte.
     editor.data.reload();
+    editor.translations.reload();
     editor.dialogs.reload();
     lastSaved = "";
     issues = [];

@@ -61,12 +61,21 @@ class EditTools {
       expectedRevision: revision,
     }, editScene, false, ["label", "operations"]);
     tool("edit_table", "Bir veri tablosunu değiştirir: set [{id, values}], add [{id, values}], delete [ids]. Kullanılan satır silinmez, kimliği değişmez. "
-      + "addColumns [{name, title, type, options?, table?}]: type metin, sayi, tam, evet_hayir, secim (options gerekir), baglanti (table gerekir), renk, varlik (res altındaki dosya yolu, ör. models/tufek/tufek.hmd); var olan satırlar varsayılan değeri alır. removeColumns [ad]. Sütunlar satırlardan önce işlenir.", {
+      + "addColumns [{name, title, type, options?, table?, translatable?}]: type metin, sayi, tam, evet_hayir, secim (options gerekir), baglanti (table gerekir), renk, varlik (res altındaki dosya yolu, ör. models/tufek/tufek.hmd); var olan satırlar varsayılan değeri alır. removeColumns [ad]. Sütunlar satırlardan önce işlenir. "
+      + "translatable {sütun: true|false}: metin sütununun Çevrilir işareti (oyuncuya görünen metin, dil başına çevrilir). Silinen satır ve sütunun çevirisi de aynı adımda silinir. Bu araç kaynak dili yazar; çeviri için set_translation.", {
       table: {type: "string"}, set: {type: "array", items: {type: "object"}}, add: {type: "array", items: {type: "object"}},
-      addColumns: {type: "array", items: {type: "object"}}, removeColumns: {type: "array", items: {type: "string"}},
+      addColumns: {type: "array", items: {type: "object"}}, removeColumns: {type: "array", items: {type: "string"}}, translatable: {type: "object"},
       delete: {type: "array", items: {type: "string"}}, label: {type: "string"}, expectedRevision: revision,
     }, editTable, false, ["table"]);
-    tool("edit_dialog", "Bir diyaloğu değiştirir veya oluşturur (create true). nodes: düğümleri kimliğe göre ekler veya günceller (diyalog dosyasındaki biçim: id, type baslangic|satir|secenek|kosul|olay|bitis, speaker, text, next, choices [{text, next}], kind degisken|esya|iliski (fraksiyonla ilişki, en az; ölçek oyunun ayarı), name, value, yes, no, event). remove: silinecek düğümler. arrange: düğümleri akışa göre dizer.", {
+    tool("list_translations", "Çevirilerin durumu (Data panelindeki Dil; oyunun dilleri ve kaynak dili). language verilmezse kaynak dışındaki bütün diller, table verilmezse çevrilir sütunu olan bütün tablolar. "
+      + "Diyaloglar diyaloglar/<id> adıyla (satır: düğüm, seçenek: düğüm.seçenek; sütun metin). Her dil ve tablo için eksik (kaynakta dolu, çeviride boş: oyunda kaynak metin görünür) ve eskimiş (kaynak metin çeviriden sonra değişmiş) hücreler, kaynak metin ve çeviriyle; all true ise bütün çevrilir hücreler. limit (varsayılan 50) kadar hücre.", {
+      language: {type: "string"}, table: {type: "string"}, all: {type: "boolean"}, limit: {type: "integer"},
+    }, listTranslations, true);
+    tool("set_translation", "Çeviri hücrelerini yazar (Data panelinde dili seçip hücreyi düzenlemek gibi), hepsi tek Ajan: adımı; biri hatalıysa hiçbiri yazılmaz. "
+      + "language: kaynak dışındaki bir dil. entries [{table, row, column, text}]: yalnızca çevrilir sütunlar; diyalog için table diyaloglar/<id>, row düğüm ya da düğüm.seçenek, column metin. Kaynak metnin özeti bugünkü metinden alınır, eskimiş çeviri yazılınca tazelenir. {table, row, column, confirm: true}: kaynak değişti ama çeviri hâlâ doğru (yazım düzeltmesi), metin aynı kalır, eskimiş işareti kalkar (Data panelindeki Doğru). Kaynak dili edit_table yazar.", {
+      language: {type: "string"}, entries: {type: "array", items: {type: "object"}}, label: {type: "string"}, expectedRevision: revision,
+    }, setTranslation, false, ["language", "entries"]);
+    tool("edit_dialog", "Bir diyaloğu değiştirir veya oluşturur (create true). Metinler kaynak dildedir; çeviri set_translation (table diyaloglar/<id>, row düğüm ya da düğüm.seçenek kimliği). nodes: düğümleri kimliğe göre ekler veya günceller (diyalog dosyasındaki biçim: id, type baslangic|satir|secenek|kosul|olay|bitis, speaker (oyunun kişi tablosunun kimliği), text, next, choices [{id?, text, next}] (id seçeneğin kalıcı kimliği; verilmezse metni aynı eski seçeneğinki, yoksa yenisi), kind degisken|esya|iliski (fraksiyonla ilişki, en az; ölçek oyunun ayarı), name, value, yes, no, event). remove: silinecek düğümler. arrange: düğümleri akışa göre dizer.", {
       id: {type: "string"}, title: {type: "string"}, create: {type: "boolean"}, nodes: {type: "array", items: {type: "object"}},
       remove: {type: "array", items: {type: "integer"}}, arrange: {type: "boolean"}, label: {type: "string"}, expectedRevision: revision,
     }, editDialog, false, ["id"]);
@@ -409,8 +418,18 @@ class EditTools {
       if (row == null) throw 'satır yok: ${spec.id}';
       fill(table, row, spec.values);
     }
+    if (args.translatable != null) for (field in Reflect.fields(args.translatable)) {
+      var column = table.column(field);
+      if (column == null) throw '${table.title} tablosunda "$field" sütunu yok';
+      if (column.type != DataTable.TEXT) throw '$field: yalnızca metin sütunu çevrilir';
+      column.translatable = Reflect.field(args.translatable, field) == true;
+    }
     var after = table.write();
-    if (after != before) editor.commands.execute(new SetTableCommand('Ajan: ${args.label == null ? name + " tablosu" : args.label}', editor.data, name, before, after));
+    if (after != before) {
+      var label = 'Ajan: ${args.label == null ? name + " tablosu" : args.label}';
+      var commands : Array<Command> = [new SetTableCommand(label, editor.data, name, before, after)];
+      editor.commands.execute(new GroupCommand(label, commands.concat(scene.editor.TranslationSync.commands(editor, name, table))));
+    }
     editor.document.validate();
     return {table: name, rows: table.rows.length, revision: editor.commands.revision, changed: after != before};
   }
@@ -433,7 +452,102 @@ class EditTools {
       if (spec.table == null || editor.data.text(spec.table) == null) throw '$name: bağlantı sütunu var olan bir table ister';
       column.table = spec.table;
     }
+    if (spec.translatable == true) {
+      if (type != DataTable.TEXT) throw '$name: yalnızca metin sütunu çevrilir';
+      column.translatable = true;
+    }
     return column;
+  }
+
+  // Çevrilir kaynaklar: çevrilir sütunu olan tablolar ve diyaloglar ("diyaloglar/<id>", Dialog.texts).
+  function translatableSources() : Array<String> {
+    var names = [for (name in editor.data.names()) if (editor.data.tables.get(name).translatableColumns().length > 0) name];
+    for (id in editor.dialogs.ids()) names.push(Dialog.textTableName(id));
+    return names;
+  }
+
+  function sourceOf(name : String) : Null<DataTable> {
+    if (StringTools.startsWith(name, Dialog.TEXT_TABLE_PREFIX)) {
+      var dialog = editor.dialogs.dialogs.get(name.substr(Dialog.TEXT_TABLE_PREFIX.length));
+      return dialog == null ? null : dialog.texts();
+    }
+    return editor.data.tables.get(name);
+  }
+
+  function translationLanguages(wanted : Null<String>) : Array<String> {
+    var others = [for (code in editor.languages) if (code != editor.sourceLanguage) code];
+    if (others.length == 0) throw "Oyun dil bildirmiyor (çeviri yok)";
+    if (wanted == null) return others;
+    if (wanted == editor.sourceLanguage) throw '$wanted kaynak dil: tabloların kendisi (edit_table)';
+    if (others.indexOf(wanted) < 0) throw 'Bilinmeyen dil: $wanted. Diller: ${others.join(", ")} (kaynak ${editor.sourceLanguage})';
+    return [wanted];
+  }
+
+  // Data panelinin çeviri görünümüyle aynı veri: editörün bellekteki çevirileri (Editor.translations).
+  function listTranslations(args : Dynamic) : Dynamic {
+    var languages = translationLanguages(args.language);
+    var limit : Int = args.limit == null ? 50 : args.limit, shown = 0;
+    var names = args.table == null ? translatableSources() : [args.table];
+    var reader = new scene.data.Translations(path -> {
+      var prefix = scene.data.Translations.DIRECTORY + "/";
+      editor.translations.text(path.substring(prefix.length, path.length - DataTable.SUFFIX.length));
+    });
+    var tables = [];
+    for (name in names) {
+      var source = sourceOf(name);
+      if (source == null) throw 'Tablo ya da diyalog yok: $name';
+      var columns = source.translatableColumns();
+      if (columns.length == 0) continue;
+      for (language in languages) {
+        var audit = reader.audit(language, source);
+        var cells = [];
+        for (row in source.rows) for (column in columns) {
+          var id : String = row.get("id"), key = '$id.$column';
+          var missing = audit.missing.indexOf(key) >= 0, stale = audit.stale.indexOf(key) >= 0;
+          if (!(args.all == true || missing || stale) || row.get(column) == null || row.get(column) == "" || shown >= limit) continue;
+          shown++;
+          cells.push({row: id, column: column, source: row.get(column), translation: reader.text(language, name, id, column),
+            state: missing ? "eksik" : stale ? "eskimiş" : "tamam"});
+        }
+        tables.push({table: name, language: language, missing: audit.missing.length, stale: audit.stale.length, extra: audit.extra, cells: cells});
+      }
+    }
+    return {source: editor.sourceLanguage, languages: languages, tables: tables, truncated: shown >= limit};
+  }
+
+  function setTranslation(args : Dynamic) : Dynamic {
+    checkRevision(args.expectedRevision);
+    var language : String = translationLanguages(args.language)[0];
+    var entries : Array<Dynamic> = args.entries;
+    var copies = new Map<String, DataTable>(), originals = new Map<String, Null<String>>();
+    for (entry in entries) {
+      var name : String = entry.table, source = sourceOf(entry.table);
+      if (source == null) throw 'Tablo ya da diyalog yok: $name (diyalog için diyaloglar/<id>)';
+      var key = '$language/$name';
+      if (!originals.exists(key)) {
+        originals.set(key, editor.translations.text(key));
+        var layer = editor.translations.tables.get(key);
+        if (layer != null) copies.set(key, layer.clone());
+      }
+      if (entry.confirm == true) {
+        var confirmed = scene.data.Translations.confirm(copies.get(key), source, entry.row, entry.column);
+        if (!confirmed.ok) throw '$name/${entry.row}.${entry.column}: onaylanacak çeviri yok (önce text ile yaz)';
+        copies.set(key, confirmed.table);
+        continue;
+      }
+      if (entry.text == null) throw '$name/${entry.row}: text gerekir (ya da confirm true)';
+      var result = scene.data.Translations.put(copies.get(key), source, entry.row, entry.column, entry.text);
+      if (!result.ok) throw '$name/${entry.row}.${entry.column}: kaynakta satır yok ya da sütun çevrilir değil (${source.translatableColumns().join(", ")})';
+      copies.set(key, result.table);
+    }
+    var label = 'Ajan: ${args.label == null ? language + " çevirisi" : args.label}';
+    var commands : Array<Command> = [];
+    for (key => table in copies) {
+      var after = table.write();
+      if (after != originals.get(key)) commands.push(new SetTableCommand(label, editor.translations, key, originals.get(key), after));
+    }
+    if (commands.length > 0) editor.commands.execute(new GroupCommand(label, commands));
+    return {language: language, written: entries.length, changed: commands.length > 0, revision: editor.commands.revision};
   }
 
   function fill(table : DataTable, row : haxe.DynamicAccess<Dynamic>, values : Dynamic) {
@@ -471,6 +585,12 @@ class EditTools {
         node = {id: spec.id, type: spec.type, x: 0, y: 0};
         dialog.nodes.push(node);
       }
+      // Kimliksiz gelen seçenek, metni aynı olan eski seçeneğin kimliğini alır (çevirisi ona bağlı kalır).
+      var incoming : Null<Array<Dynamic>> = spec.choices;
+      if (incoming != null && node.choices != null) for (choice in incoming) if (choice.id == null) {
+        var same = Lambda.find(node.choices, old -> old.text == choice.text);
+        if (same != null && !Lambda.exists(incoming, other -> other.id == same.id)) choice.id = same.id;
+      }
       for (field in Reflect.fields(spec)) Reflect.setField(node, field, Reflect.field(spec, field));
     }
     var removed : Array<Int> = args.remove == null ? [] : args.remove;
@@ -489,7 +609,12 @@ class EditTools {
     }
     var after = dialog.write();
     Dialog.read(id, after);
-    if (after != before) editor.commands.execute(new SetDialogCommand('Ajan: ${args.label == null ? dialog.title + " diyaloğu" : args.label}', editor.dialogs, id, before, after));
+    if (after != before) {
+      var label = 'Ajan: ${args.label == null ? dialog.title + " diyaloğu" : args.label}';
+      var commands : Array<Command> = [new SetDialogCommand(label, editor.dialogs, id, before, after)];
+      commands = commands.concat(scene.editor.TranslationSync.commands(editor, Dialog.textTableName(id), Dialog.read(id, after).texts()));
+      editor.commands.execute(new GroupCommand(label, commands));
+    }
     editor.document.validate();
     return {id: id, nodes: dialog.nodes.length, revision: editor.commands.revision, changed: after != before,
       warnings: [for (issue in editor.document.issues) if (issue.dialog == id) issue.message]};

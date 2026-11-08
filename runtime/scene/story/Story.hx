@@ -16,6 +16,11 @@ class Story {
   public var log(default, set) : Null<StoryLog>;
   // Tetikleyicinin koşulları tuttu, eylemleri çalışacak (onFire) ve çalıştı (onFired). Oyunun olay kaydı eylemlerin
   // yaptığı değişiklikleri tetikleyiciye bağlar.
+  // Diyalog metni seçili dilde (oyun bağlar; docs/DIL_PLANI.md): (diyalog, anahtar, kaynak metin) → gösterilen metin.
+  // Bağlı değilse kaynak metin.
+  public var translateLine : Null<(String, String, String) -> String>;
+  // Konuşanın gösterilen adı: düğümdeki değer (oyunun kişi kimliği) → ad. Bağlı değilse değer olduğu gibi.
+  public var speakerName : Null<String -> String>;
   public var onFire : Null<Entity->Void>;
   public var onFired : Null<Entity->Void>;
 

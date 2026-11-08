@@ -6,6 +6,7 @@ class PlayOptions {
   static inline var CAMERA = "--camera";
   static inline var SAVE = "--save";
   static inline var HOUR = "--hour";
+  static inline var LANGUAGE = "--lang";
 
   public var scene : String;
   public var camera : Null<Array<Float>>;  // konum ve hedef: x y z x y z
@@ -49,6 +50,12 @@ class PlayOptions {
       if (!Math.isNaN(value)) options.hour = value;
     }
     return options;
+  }
+
+  // "--lang <kod>": oyunun dili (oyuncunun seçiminden ve sistemin dilinden önce gelir; sınamalar dili böyle sabitler).
+  public static function language(args : Array<String>) : Null<String> {
+    var at = args.indexOf(LANGUAGE);
+    return at < 0 || at + 1 >= args.length ? null : args[at + 1];
   }
 
   // Dağıtım sürümü de "--save <dosya>" ile açılabilir (Devam et, kayıttan oyna).

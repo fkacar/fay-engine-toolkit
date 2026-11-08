@@ -107,6 +107,15 @@ class Translations {
     return {table: table, ok: true};
   }
 
+  // Kaynak değişti ama çeviri hâlâ doğru (yazım düzeltmesi gibi): metin aynı kalır, kaynağın özeti bugünkü metinden alınır,
+  // eskimiş sayılmaz. Çeviri yoksa ya da boşsa yazılmaz (false).
+  public static function confirm(translation : Null<DataTable>, source : DataTable, id : String, column : String) : {table : Null<DataTable>, ok : Bool} {
+    var row = translation == null ? null : translation.find(id);
+    var text : Null<String> = row == null ? null : row.get(column);
+    if (text == null || text == "") return {table: translation, ok: false};
+    return put(translation, source, id, column, text);
+  }
+
   static function empty(source : DataTable) : DataTable {
     return new DataTable(source.name, source.title);
   }

@@ -7,16 +7,49 @@ import sys.FileSystem;
 import sys.io.File;
 
 // Editörde açık tablolar. Değişiklikler komutla yapılır, sahneyle birlikte kaydedilir.
+// İkinci bir örnek çevirileri tutar (Editor.translations): klasör res/ceviri, alt klasörler dil, ad "<dil>/<tablo>"
+// (scene.data.Translations). Geri alma, kaydetme, dışarıda değişen dosyayla birleştirme ikisinde de aynıdır.
 class DataStore {
   public static inline var DIRECTORY = "res/data";
+  // res/ + scene.data.Translations.DIRECTORY
+  public static inline var TRANSLATION_DIRECTORY = "res/ceviri";
 
   public var tables(default, null) = new Map<String, DataTable>();
+  public var directory(default, null) : String;
+  // Alt klasörlü depo (çeviriler): tablolar <klasör>/<alt klasör>/<ad>.table.json, adı "<alt klasör>/<ad>".
+  public var nested(default, null) : Bool;
 
   var disk = new Map<String, String>();
   var editor : Null<Editor>;
 
-  public function new() {
+  public function new(?directory : String, nested = false) {
+    this.directory = directory == null ? DIRECTORY : directory;
+    this.nested = nested;
     reload();
+  }
+
+  // Klasördeki tablo adları. Alt klasörlüyse her derinlikte "<alt klasör>/.../<ad>" (çeviri: "tr/esyalar",
+  // "tr/diyaloglar/berber").
+  function filesOnDisk() : Array<String> {
+    var found = [];
+    if (!FileSystem.exists(directory)) return found;
+    function scan(folder : String) {
+      var path = folder == "" ? directory : '$directory/$folder';
+      for (file in FileSystem.readDirectory(path)) {
+        var child = folder == "" ? file : '$folder/$file';
+        if (FileSystem.isDirectory('$path/$file')) {
+          if (nested) scan(child);
+        } else if (StringTools.endsWith(file, DataTable.SUFFIX) && (!nested || folder != ""))
+          found.push(child.substr(0, child.length - DataTable.SUFFIX.length));
+      }
+    }
+    scan("");
+    return found;
+  }
+
+  static function baseName(name : String) : String {
+    var slash = name.lastIndexOf("/");
+    return slash < 0 ? name : name.substr(slash + 1);
   }
 
   public function attach(editor : Editor) {
@@ -28,14 +61,11 @@ class DataStore {
   public function reload() {
     tables = new Map();
     disk = new Map();
-    if (!FileSystem.exists(DIRECTORY)) return;
-    for (file in FileSystem.readDirectory(DIRECTORY)) {
-      if (!StringTools.endsWith(file, DataTable.SUFFIX)) continue;
-      var name = file.substr(0, file.length - DataTable.SUFFIX.length);
-      var text = File.getContent('$DIRECTORY/$file');
+    for (name in filesOnDisk()) {
+      var text = File.getContent(pathOf(name));
       disk.set(name, text);
       if (editor != null) editor.diskGuard.observe(pathOf(name), text);
-      try tables.set(name, DataTable.read(name, text)) catch (e : Dynamic) {}
+      try tables.set(name, DataTable.read(baseName(name), text)) catch (e : Dynamic) {}
     }
   }
 
@@ -62,7 +92,7 @@ class DataStore {
 
   public function apply(name : String, text : Null<String>) {
     if (text == null) tables.remove(name);
-    else tables.set(name, DataTable.read(name, text));
+    else tables.set(name, DataTable.read(baseName(name), text));
     if (onApplied != null) onApplied(name);
   }
 
@@ -72,7 +102,10 @@ class DataStore {
 
   // Dışarıda değişen tablo kör yazılmaz: satır satır birleşir, çakışırsa kaydedilmez.
   public function save() {
-    if (Lambda.count(changed()) > 0 && !FileSystem.exists(DIRECTORY)) FileSystem.createDirectory(DIRECTORY);
+    for (name => text in changed()) if (text != null) {
+      var folder = haxe.io.Path.directory(pathOf(name));
+      if (!FileSystem.exists(folder)) FileSystem.createDirectory(folder);
+    }
     return StoreGuard.save(editor, access(), changed());
   }
 
@@ -91,8 +124,8 @@ class DataStore {
     return StoreGuard.check(editor, access());
   }
 
-  function pathOf(name : String) {
-    return '$DIRECTORY/$name${DataTable.SUFFIX}';
+  public function pathOf(name : String) {
+    return '$directory/$name${DataTable.SUFFIX}';
   }
 
   function access() : StoreGuard.StoreAccess {
@@ -101,12 +134,7 @@ class DataStore {
       names: () -> {
         var found = [for (name in disk.keys()) name];
         for (name in tables.keys()) if (found.indexOf(name) < 0) found.push(name);
-        if (FileSystem.exists(DIRECTORY))
-          for (file in FileSystem.readDirectory(DIRECTORY)) {
-            if (!StringTools.endsWith(file, DataTable.SUFFIX)) continue;
-            var name = file.substr(0, file.length - DataTable.SUFFIX.length);
-            if (found.indexOf(name) < 0) found.push(name);
-          }
+        for (name in filesOnDisk()) if (found.indexOf(name) < 0) found.push(name);
         found;
       },
       base: name -> disk.get(name),
@@ -117,8 +145,8 @@ class DataStore {
       mine: text,
       apply: apply,
       forget: name -> editor.commands.forget(command -> Std.isOfType(command, SetTableCommand) && cast(command, SetTableCommand).name == name),
-      merge: (name, base, mine, theirs, prefer) -> ThreeWay.table(name, base, mine, theirs, prefer),
-      canonical: (name, text) -> try DataTable.read(name, text).write() catch (e : Dynamic) text,
+      merge: (name, base, mine, theirs, prefer) -> ThreeWay.table(baseName(name), base, mine, theirs, prefer),
+      canonical: (name, text) -> try DataTable.read(baseName(name), text).write() catch (e : Dynamic) text,
     };
   }
 

@@ -38,6 +38,12 @@ class DataUsage {
         if (Lambda.exists(dialog.nodes, node -> node.type == Dialog.CONDITION && node.kind == Dialog.ITEM && node.name == id))
           found.push('Diyalog ${dialog.title}');
       }
+    // Diyaloğun satırı konuşanın satırını kullanır.
+    if (table == editor.dialogs.speakerTable)
+      for (key in editor.dialogs.ids()) {
+        var dialog = editor.dialogs.dialogs.get(key);
+        if (Lambda.exists(dialog.nodes, node -> node.type == Dialog.LINE && node.speaker == id)) found.push('Diyalog ${dialog.title}');
+      }
     // Diyaloğun İlişki koşulu fraksiyonun satırını kullanır.
     if (table == editor.dialogs.factionTable)
       for (key in editor.dialogs.ids()) {

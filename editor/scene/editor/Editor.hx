@@ -78,6 +78,11 @@ class Editor {
   public var importer(default, null) = new AssetImporter();
   public var diskGuard(default, null) = new DiskGuard();
   public var data(default, null) = new DataStore();
+  // Tabloların çevrilir sütunlarının dil başına çevirileri (res/ceviri/<dil>/; scene.data.Translations).
+  public var translations(default, null) = new DataStore(DataStore.TRANSLATION_DIRECTORY, true);
+  // Oyunun dilleri (oyun bildirir): kaynak dil tablolardadır, öbürleri çeviridir. Boşsa Data panelinde dil seçimi yok.
+  public var languages : Array<String> = [];
+  public var sourceLanguage = "";
   public var dialogs(default, null) = new DialogStore();
   public var previews(default, null) = new ModelPreview();
   public var trace(default, null) = new InputTrace();
@@ -170,6 +175,7 @@ class Editor {
     worldPanel = new WorldPanel(this);
     dataPanel = new DataPanel(this);
     data.attach(this);
+    translations.attach(this);
     dialogs.attach(this);
     dialogWorkspace = new DialogWorkspace(this);
     dialogPanel = new DialogPanel(this);
@@ -529,6 +535,9 @@ class Editor {
           case Dialog.CONDITION if (node.name == null || node.name == ""): "koşulun adı boş";
           case Dialog.CHOICES if (node.choices == null || Lambda.exists(node.choices, choice -> choice.text == "")): "boş seçenek var";
           case Dialog.LINE if (node.text == null || node.text == ""): "satır boş";
+          // Konuşan oyunun kişi tablosunun kimliğidir (adı orada yazılır ve çevrilir).
+          case Dialog.LINE if (node.speaker != null && node.speaker != "" && dialogs.speakerTable != null && data.tables.exists(dialogs.speakerTable)
+            && data.tables.get(dialogs.speakerTable).find(node.speaker) == null): 'konuşan "${node.speaker}" ${dialogs.speakerTable} tablosunda yok';
           default: null;
         };
         if (problem != null) issues.push({entity: null, message: 'Diyalog ${dialog.title}: $problem', dialog: id, node: node.id});

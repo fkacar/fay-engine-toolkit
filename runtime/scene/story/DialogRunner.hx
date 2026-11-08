@@ -9,6 +9,9 @@ class DialogRunner {
   public var speaker(default, null) = "";
   public var text(default, null) = "";
   public var choices(default, null) : Array<String> = [];
+  // Seçeneklerin kaynak metni ve çeviri anahtarı (görev testleri seçeneği her dilde bulur).
+  public var sourceChoices(default, null) : Array<String> = [];
+  public var choiceKeys(default, null) : Array<String> = [];
   public var finished(default, null) = false;
   public var id(get, never) : String;
 
@@ -44,13 +47,17 @@ class DialogRunner {
     while (current != null && steps++ < STEP_LIMIT) {
       switch (current.type) {
         case Dialog.LINE:
-          speaker = current.speaker == null ? "" : current.speaker;
-          text = current.text == null ? "" : current.text;
+          var who = current.speaker == null ? "" : current.speaker;
+          speaker = who == "" || story.speakerName == null ? who : story.speakerName(who);
+          text = translated(Dialog.lineKey(current), current.text == null ? "" : current.text);
           choices = [];
           if (story.log != null) story.log.add("satir", {dialog: dialog.id, node: current.id, speaker: speaker, text: text});
           return;
         case Dialog.CHOICES:
-          choices = [for (choice in current.choices) choice.text];
+          var node = current;
+          sourceChoices = [for (choice in node.choices) choice.text];
+          choiceKeys = [for (choice in node.choices) Dialog.choiceKey(node, choice)];
+          choices = [for (i in 0...node.choices.length) translated(choiceKeys[i], sourceChoices[i])];
           if (story.log != null) story.log.add("secenekler", {dialog: dialog.id, node: current.id, choices: choices});
           return;
         case Dialog.CONDITION:
@@ -69,6 +76,10 @@ class DialogRunner {
     }
     finished = true;
     if (story.log != null) story.log.add("diyalog_bitti", {dialog: dialog.id});
+  }
+
+  function translated(key : String, source : String) : String {
+    return source == "" || story.translateLine == null ? source : story.translateLine(dialog.id, key, source);
   }
 
   function get_id() {

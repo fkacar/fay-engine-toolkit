@@ -15,6 +15,8 @@ class DialogStore {
   public var itemTable : Null<String>;
   // İlişki koşulunun fraksiyon tablosu (oyun bağlar).
   public var factionTable : Null<String>;
+  // Konuşanların tablosu (oyun bildirir): satırın konuşanı bu tablonun kimliğidir, adı orada yazılır ve çevrilir.
+  public var speakerTable : Null<String>;
 
   var disk = new Map<String, String>();
   var editor : Null<Editor>;

@@ -1,6 +1,8 @@
 package scene.story;
 
 typedef DialogChoice = {
+  // Düğüm içinde kalıcı kimlik (biçim 2): çevirinin anahtarı "<düğüm>.<kimlik>"; seçeneklerin sırası değişse de tutar.
+  @:optional var id : Int;
   var text : String;
   var next : Int;
 }
@@ -25,7 +27,13 @@ typedef DialogNode = {
 // Konuşma ağacı. Olay düğümü adlı bir olay yayar, aynı olayı bekleyen tetikleyicinin eylemleri
 // çalışır: eşya verme gibi işler tek yerde yazılır. Her düğüm tek satıra yazılır.
 class Dialog {
-  public static inline var VERSION = 1;
+  // 2: seçeneklerin kimliği. 1 de okunur: seçenekler sırayla 1, 2, ... kimliğini alır.
+  public static inline var VERSION = 2;
+  public static var READABLE(default, never) = [1, 2];
+  // Çeviri (scene.data.Translations): diyaloğun metinleri "diyaloglar/<diyalog>" tablosu gibi çevrilir; satır kimliği
+  // satır düğümü için "<düğüm>", seçenek için "<düğüm>.<seçenek>", tek sütun "metin".
+  public static inline var TEXT_TABLE_PREFIX = "diyaloglar/";
+  public static inline var TEXT_COLUMN = "metin";
   public static inline var DIRECTORY = "data/dialogs";
   public static inline var SUFFIX = ".dialog.json";
   public static inline var START = "baslangic";
@@ -58,14 +66,51 @@ class Dialog {
 
   public static function read(id : String, text : String) : Dialog {
     var raw : Dynamic = haxe.Json.parse(text);
-    if (raw.version != VERSION) throw '$id diyaloğunun sürümü desteklenmiyor: ${raw.version}';
+    if (READABLE.indexOf(raw.version) < 0) throw '$id diyaloğunun sürümü desteklenmiyor: ${raw.version}';
     var dialog = new Dialog(id, raw.title);
     var nodes : Array<DialogNode> = raw.nodes;
     dialog.nodes = nodes;
+    for (node in nodes) if (node.choices != null) for (choice in node.choices) if (choice.id == null) choice.id = freeChoiceId(node);
     return dialog;
   }
 
+  // Düğümde kullanılmayan en küçük seçenek kimliği (1'den).
+  public static function freeChoiceId(node : DialogNode) : Int {
+    var top = 0;
+    if (node.choices != null) for (choice in node.choices) if (choice.id != null && choice.id > top) top = choice.id;
+    return top + 1;
+  }
+
+  public static function lineKey(node : DialogNode) : String {
+    return '${node.id}';
+  }
+
+  public static function choiceKey(node : DialogNode, choice : DialogChoice) : String {
+    return '${node.id}.${choice.id}';
+  }
+
+  public static function textTableName(id : String) : String {
+    return TEXT_TABLE_PREFIX + id;
+  }
+
+  // Çevrilecek metinler bir tablo gibi (Translations.audit ve put bunu kaynak alır): satırların metni ve seçenekler.
+  // Tablonun adı çeviri dosyasının adıdır: "diyaloglar/<diyalog>".
+  public function texts() : scene.data.DataTable {
+    var table = new scene.data.DataTable(textTableName(id), title);
+    table.columns = [{name: TEXT_COLUMN, title: "Metin", type: scene.data.DataTable.TEXT, translatable: true}];
+    var sorted = nodes.copy();
+    sorted.sort((a, b) -> a.id - b.id);
+    for (node in sorted) {
+      if (node.type == LINE && node.text != null && node.text != "") table.addRow(lineKey(node)).set(TEXT_COLUMN, node.text);
+      if (node.type == CHOICES && node.choices != null)
+        for (choice in node.choices) if (choice.text != null && choice.text != "") table.addRow(choiceKey(node, choice)).set(TEXT_COLUMN, choice.text);
+    }
+    return table;
+  }
+
   public function write() : String {
+    // Kimliksiz yeni seçenek (editör, ajan) kimliğini yazılırken alır.
+    for (node in nodes) if (node.choices != null) for (choice in node.choices) if (choice.id == null) choice.id = freeChoiceId(node);
     var sorted = nodes.copy();
     sorted.sort((a, b) -> a.id - b.id);
     var lines = [for (node in sorted) '\n    ' + nodeText(node)];
@@ -114,7 +159,7 @@ class Dialog {
       if (value != null) parts.push('"$key": $value');
     }
     if (node.choices != null)
-      parts.push('"choices": [' + [for (choice in node.choices) '{"text": ${q(choice.text)}, "next": ${choice.next}}'].join(", ") + "]");
+      parts.push('"choices": [' + [for (choice in node.choices) '{"id": ${choice.id}, "text": ${q(choice.text)}, "next": ${choice.next}}'].join(", ") + "]");
     return "{" + parts.join(", ") + "}";
   }
 

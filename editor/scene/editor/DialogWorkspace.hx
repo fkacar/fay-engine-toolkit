@@ -76,6 +76,10 @@ class DialogWorkspace {
   var arrangeNext = false;
   var hasOverlap = false;
   var sceneSelection : Array<Entity> = [];
+  // Düzenleme dili (Data panelindeki gibi): kaynak dışındaki dilde satır ve seçenek metinlerinin çevirisi düzenlenir
+  // (res/ceviri/<dil>/diyaloglar/<diyalog>.table.json), öbür alanlar kilitlidir.
+  var language = "";
+  var typing = new Map<String, String>();
 
   public function new(editor : Editor) {
     this.editor = editor;
@@ -149,6 +153,7 @@ class DialogWorkspace {
       }
       ImGui.endCombo();
     }
+    drawLanguage();
     nextInRow("Yeni diyalog");
     newDialogButton();
     nextInRow("Tümünü göster");
@@ -322,7 +327,7 @@ class DialogWorkspace {
     var width = nodeWidth();
     switch (node.type) {
       case Dialog.LINE:
-        if (!blank(node.speaker)) ImGui.text(node.speaker + ":");
+        if (!blank(node.speaker)) ImGui.text(speakerLabel(node.speaker) + ":");
         ImGui.pushTextWrapPos(left + width);
         if (blank(node.text)) ImGui.textDisabled(EMPTY_LINE);
         else ImGui.textWrapped(shorten(node.text, SHORT_TEXT));
@@ -481,7 +486,7 @@ class DialogWorkspace {
       if (ImGui.button("Baştan")) restartPreview(dialog);
     } else switch (node.type) {
       case Dialog.LINE:
-        ImGui.textColored(COLORS.get(Dialog.LINE), blank(node.speaker) ? "(konuşan yok)" : node.speaker);
+        ImGui.textColored(COLORS.get(Dialog.LINE), blank(node.speaker) ? "(konuşan yok)" : speakerLabel(node.speaker));
         ImGui.textWrapped(blank(node.text) ? "(boş satır)" : node.text);
         if (ImGui.button("Devam")) step(node.next);
       case Dialog.CHOICES:
@@ -519,7 +524,13 @@ class DialogWorkspace {
     ImGui.textDisabled('Diyalog: ${dialog.title} (${dialog.id})');
     var node = selected.length == 1 ? dialog.node(selected[0]) : null;
     if (node == null) {
+      if (translating()) ImGui.beginDisabled();
       drawDialogProperties(dialog);
+      if (translating()) ImGui.endDisabled();
+      return;
+    }
+    if (translating()) {
+      drawTranslation(dialog, node);
       return;
     }
     ImGui.separator();
@@ -580,8 +591,125 @@ class DialogWorkspace {
     for (name in starters) ImGui.bulletText(name);
   }
 
+  function translating() : Bool {
+    return language != "" && language != editor.sourceLanguage && editor.languages.indexOf(language) >= 0;
+  }
+
+  function drawLanguage() {
+    if (editor.languages.length < 2) {
+      language = "";
+      return;
+    }
+    if (language == "" || editor.languages.indexOf(language) < 0) language = editor.sourceLanguage;
+    var label = language == editor.sourceLanguage ? '$language (kaynak)' : language;
+    nextInRow(label);
+    ImGui.setNextItemWidth(110 * editor.interfaceScale);
+    if (ImGui.beginCombo("Dil", label)) {
+      for (code in editor.languages)
+        if (ImGui.selectable(code == editor.sourceLanguage ? '$code (kaynak)' : code, code == language)) language = code;
+      ImGui.endCombo();
+    }
+    if (ImGui.isItemHovered()) ImGui.setTooltip("Kaynak dilde diyalog düzenlenir. Öbür dilde yalnızca satırların ve seçeneklerin çevirisi düzenlenir; kaynağı değişen çeviri sarıdır.");
+  }
+
+  // Çeviri görünümü: kaynak metin solukça üstte, altında seçili dilin çevirisi.
+  function drawTranslation(dialog : Dialog, node : DialogNode) {
+    ImGui.separator();
+    ImGui.textColored(COLORS.get(node.type), TITLES.get(node.type));
+    ImGui.pushID('${node.id}');
+    var texts = dialog.texts();
+    switch (node.type) {
+      case Dialog.LINE:
+        if (!blank(node.speaker)) ImGui.textDisabled('Konuşan: ${speakerLabel(node.speaker)} (Data: kişinin adı çevrilir)');
+        translationField(texts, Dialog.lineKey(node), node.text, true);
+      case Dialog.CHOICES:
+        var choices = node.choices == null ? [] : node.choices;
+        for (k in 0...choices.length) {
+          ImGui.pushID('secenek$k');
+          ImGui.text('${k + 1}.');
+          ImGui.sameLine();
+          translationField(texts, Dialog.choiceKey(node, choices[k]), choices[k].text, false);
+          ImGui.popID();
+        }
+      default:
+        ImGui.textWrapped("Bu düğümde çevrilecek metin yok. Satırları ve seçenekleri kaynak dilde düzenle.");
+    }
+    ImGui.popID();
+  }
+
+  function translationField(texts : scene.data.DataTable, key : String, source : Null<String>, multiline : Bool) {
+    var original = source == null ? "" : source;
+    if (original == "") {
+      ImGui.textDisabled("(kaynakta boş)");
+      return;
+    }
+    var name = Dialog.textTableName(current), table = '$language/$name';
+    var layer = editor.translations.tables.get(table);
+    var stored = layer == null ? null : layer.find(key);
+    var saved : String = stored == null || stored.get(Dialog.TEXT_COLUMN) == null ? "" : stored.get(Dialog.TEXT_COLUMN);
+    var stale = saved != "" && stored.get(Dialog.TEXT_COLUMN + scene.data.Translations.SOURCE_SUFFIX) != scene.data.Translations.digest(original);
+    var text = typing.exists(key) ? typing.get(key) : saved;
+    ImGui.pushTextWrapPos(0);
+    ImGui.textDisabled('${editor.sourceLanguage}: $original');
+    ImGui.popTextWrapPos();
+    if (stale) {
+      ImGui.textColored(WARNING_COLOR, "Kaynak değişti: çeviri eskimiş");
+      ImGui.sameLine();
+      if (ImGui.smallButton("Doğru")) confirm(key);
+      if (ImGui.isItemHovered()) ImGui.setTooltip(scene.editor.panels.DataPanel.CONFIRM_TIP);
+    }
+    ImGui.setNextItemWidth(-1);
+    var edited = multiline ? ImGui.inputTextMultiline("##ceviri", text, {x: -1, y: ImGui.getTextLineHeight() * TEXT_LINES + ImGui.getStyle().FramePadding.y * 2})
+      : ImGui.inputTextWithHint("##ceviri", original, text);
+    if (edited) typing.set(key, text);
+    if (ImGui.isItemDeactivatedAfterEdit() && typing.exists(key)) {
+      translate(key, typing.get(key));
+      typing.remove(key);
+    }
+  }
+
+  // Çeviri hâlâ doğru: metin aynı, kaynak özeti bugünkü metinden.
+  function confirm(key : String) {
+    var dialog = editor.dialogs.dialogs.get(current);
+    var table = '$language/${Dialog.textTableName(current)}';
+    var before = editor.translations.text(table), layer = editor.translations.tables.get(table);
+    var result = scene.data.Translations.confirm(layer == null ? null : layer.clone(), dialog.texts(), key, Dialog.TEXT_COLUMN);
+    if (!result.ok) return;
+    var after = result.table.write();
+    if (after != before) editor.commands.execute(new scene.editor.commands.SetTableCommand('Çeviri doğru ($language)', editor.translations, table, before, after));
+  }
+
+  // Bir diyalog metninin çevirisini yazar (ajanın set_translation aracıyla aynı yol).
+  function translate(key : String, text : String) {
+    var dialog = editor.dialogs.dialogs.get(current);
+    var table = '$language/${Dialog.textTableName(current)}';
+    var before = editor.translations.text(table), layer = editor.translations.tables.get(table);
+    var result = scene.data.Translations.put(layer == null ? null : layer.clone(), dialog.texts(), key, Dialog.TEXT_COLUMN, text);
+    var after = result.table.write();
+    if (result.ok && after != before) editor.commands.execute(new scene.editor.commands.SetTableCommand('Çeviri ($language)', editor.translations, table, before, after));
+  }
+
+  // Konuşanın görünen adı: oyunun kişi tablosu varsa satırın adı.
+  function speakerLabel(speaker : String) : String {
+    var table = editor.dialogs.speakerTable == null ? null : editor.data.tables.get(editor.dialogs.speakerTable);
+    if (table == null) return speaker;
+    var row = table.find(speaker);
+    return row == null ? '$speaker (bulunamadı)' : row.get("ad") != null && row.get("ad") != "" ? row.get("ad") : speaker;
+  }
+
   function drawSpeaker(node : DialogNode) {
     var speaker = node.speaker == null ? "" : node.speaker;
+    var people = editor.dialogs.speakerTable == null ? null : editor.data.tables.get(editor.dialogs.speakerTable);
+    if (people != null) {
+      var id = node.id;
+      if (ImGui.beginCombo("Konuşan", speaker == "" ? "(yok)" : speakerLabel(speaker))) {
+        if (ImGui.selectable("(yok)", speaker == "")) change("Konuşan", d -> d.node(id).speaker = "");
+        for (row in people.ids()) if (ImGui.selectable(people.label(row), row == speaker)) change("Konuşan", d -> d.node(id).speaker = row);
+        ImGui.endCombo();
+      }
+      if (ImGui.isItemHovered()) ImGui.setTooltip('Konuşan kişiler tablosundan (${editor.dialogs.speakerTable}): adı orada yazılır ve çevrilir. Yeni kişi için Data panelinde satır ekle.');
+      return;
+    }
     if (ImGui.inputText("Konuşan", speaker)) node.speaker = speaker;
     track("Konuşan");
     var names = speakers();
@@ -799,15 +927,22 @@ class DialogWorkspace {
 
   function commitCopy(label : String, copy : Dialog) {
     var before = editor.dialogs.text(current), after = copy.write();
-    if (before != after) editor.commands.execute(new SetDialogCommand(label, editor.dialogs, current, before, after));
+    if (before != after) execute(label, before, after);
   }
 
   function track(label : String) {
     if (ImGui.isItemActivated()) editStart = editor.dialogs.text(current);
     if (!ImGui.isItemDeactivatedAfterEdit()) return;
     var after = editor.dialogs.text(current);
-    if (editStart != null && after != editStart) editor.commands.execute(new SetDialogCommand(label, editor.dialogs, current, editStart, after));
+    if (editStart != null && after != editStart) execute(label, editStart, after);
     editStart = null;
+  }
+
+  // Diyalog komutu ve çevirilerin uyumu (silinen düğüm ya da seçeneğin çevirisi de silinir) tek adım.
+  function execute(label : String, before : Null<String>, after : String) {
+    var command = new SetDialogCommand(label, editor.dialogs, current, before, after);
+    var follow = TranslationSync.commands(editor, Dialog.textTableName(current), Dialog.read(current, after).texts());
+    editor.commands.execute(follow.length == 0 ? command : new scene.editor.commands.GroupCommand(label, [(command : Command)].concat(follow)));
   }
 
   static inline function pin(node : Int, slot : Int) {

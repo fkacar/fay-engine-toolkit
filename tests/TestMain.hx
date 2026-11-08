@@ -2458,6 +2458,12 @@ class TestMain {
     equals(translations.audit("tr", source).stale.length, 0, "taze çeviri");
     source.find("kilic").set("ad", "Kılıç (yeni)");
     equals(translations.audit("tr", source).stale.join(","), "kilic.ad", "kaynak değişince eskimiş");
+    var confirmed = scene.data.Translations.confirm(tr.clone(), source, "kilic", "ad");
+    var layer2 = ["ceviri/tr/esyalar.table.json" => confirmed.table.write()];
+    var after = new scene.data.Translations(path -> layer2.get(path));
+    check(confirmed.ok && after.audit("tr", source).stale.length == 0 && after.text("tr", "esyalar", "kilic", "ad") == "Kılıç",
+      "çeviri hâlâ doğru: metin aynı, eskimiş değil");
+    check(!scene.data.Translations.confirm(tr.clone(), source, "ekmek", "ad").ok, "çevirisi olmayan hücre onaylanmaz");
     equals(scene.data.Translations.digest("Kılıç"), haxe.crypto.Md5.encode("Kılıç").substr(0, 8), "özet UTF-8 MD5'in başı");
 
     // Derleme: tablodan silinen satırı kullanan sahne durur
@@ -2477,6 +2483,22 @@ class TestMain {
     check(schema.warnings[0].indexOf("fraksiyonlar") >= 0, 'uyarı tabloyu söylemeli: ${schema.warnings[0]}');
     schema.check(SceneFormat.write(scene), null, (t, id) -> true);
     equals(schema.warnings.length, 0, "uyarılar her kontrolde sıfırlanmalı");
+  }
+
+  // Diyalog biçimi 2: seçeneğin kalıcı kimliği (çeviri anahtarı); biçim 1 sırayla kimlik alır, bilinmeyen sürüm okunmaz.
+  static function testDialogFormat() {
+    var v1 = '{"version": 1, "title": "D", "nodes": [{"id": 1, "type": "baslangic", "x": 0, "y": 0, "next": 2},'
+      + '{"id": 2, "type": "secenek", "x": 0, "y": 0, "choices": [{"text": "A", "next": 0}, {"text": "B", "next": 0}]}]}';
+    var dialog = Dialog.read("d", v1);
+    equals(dialog.node(2).choices[1].id, 2, "biçim 1 seçenekleri sırayla kimlik alır");
+    dialog.node(2).choices.push({text: "C", next: 0});
+    var text = dialog.write();
+    check(text.indexOf('"version": 2') >= 0 && text.indexOf('{"id": 3, "text": "C"') >= 0, "kimliksiz yeni seçenek yazılırken kimlik alır");
+    equals(Dialog.read("d", text).write(), text, "biçim 2 kararlı");
+    equals(dialog.texts().ids().join(","), "2.1,2.2,2.3", "çevrilecek metinlerin anahtarı düğüm.seçenek");
+    var refused = false;
+    try Dialog.read("d", StringTools.replace(text, '"version": 2', '"version": 3')) catch (e : Dynamic) refused = true;
+    check(refused, "bilinmeyen diyalog sürümü okunmaz");
   }
 
   static function questDialog() {
@@ -2797,6 +2819,7 @@ class TestMain {
     testNavEquivalence();
     testSurfaces();
     testDataTables();
+    testDialogFormat();
     testWorldDelta();
     testSaveFiles();
     testRandom();

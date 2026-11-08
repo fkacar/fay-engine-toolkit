@@ -3,11 +3,17 @@ package scene.editor.panels;
 import haxe.DynamicAccess;
 import imgui.ImGui;
 import scene.data.DataTable;
+import scene.data.Translations;
 import scene.editor.commands.SetTableCommand;
 
 // Oyun verisi tabloları: fraksiyonlar, eşyalar. Hücreler doğrudan düzenlenir, her değişiklik
 // Cmd+Z ile geri alınır ve sahneyle birlikte kaydedilir.
+// Dil: oyun dillerini bildirirse (Editor.languages) üstte düzenleme dili seçilir. Kaynak dilde tablo düzenlenir; öbür
+// dilde çevrilir sütunların hücreleri çeviriyi düzenler (res/ceviri/<dil>/, Editor.translations), öbür hücreler kilitlidir.
 class DataPanel {
+  static var STALE_COLOR : ImVec4 = {x: 0.45, y: 0.33, z: 0.05, w: 1};
+  public static inline var CONFIRM_TIP = "Kaynak değişti ama çeviri hâlâ doğru (ör. yazım düzeltmesi): metin aynı kalır, eskimiş işareti kalkar. Cmd + Z ile geri alınır.";
+
   static inline var TABLE_POPUP = "Yeni tablo";
   static inline var COLUMN_POPUP = "Yeni sütun";
   static inline var ID_TIP = "Satırın oyundaki adı. Bir sahne kullanıyorsa değiştirilemez, adı istediğin gibi değiştirebilirsin.";
@@ -28,6 +34,10 @@ class DataPanel {
   var columnTable = "";
   var openTable = false;
   var openColumn = false;
+  // Düzenleme dili; boş ya da kaynak dil: tablonun kendisi.
+  var language = "";
+  // Yazılmakta olan çeviri hücreleri (satır|sütun → metin): bırakınca tek geri alma adımı olur.
+  var typing = new Map<String, String>();
 
   public function new(editor : Editor) {
     this.editor = editor;
@@ -47,6 +57,7 @@ class DataPanel {
     }
     ImGui.sameLine();
     if (ImGui.smallButton("Yeni tablo")) openTable = true;
+    drawLanguage();
     drawTablePopup();
     if (current == "") {
       ImGui.textDisabled("Henüz tablo yok");
@@ -59,6 +70,26 @@ class DataPanel {
     drawColumnPopup();
     drawRows(table);
     if (ImGui.collapsingHeader("Sütunlar")) drawColumns(table);
+  }
+
+  function translating() : Bool {
+    return language != "" && language != editor.sourceLanguage && editor.languages.indexOf(language) >= 0;
+  }
+
+  function drawLanguage() {
+    if (editor.languages.length < 2) {
+      language = "";
+      return;
+    }
+    if (language == "" || editor.languages.indexOf(language) < 0) language = editor.sourceLanguage;
+    ImGui.sameLine();
+    ImGui.setNextItemWidth(130 * editor.interfaceScale);
+    if (ImGui.beginCombo("Dil", language == editor.sourceLanguage ? '$language (kaynak)' : language)) {
+      for (code in editor.languages)
+        if (ImGui.selectable(code == editor.sourceLanguage ? '$code (kaynak)' : code, code == language)) language = code;
+      ImGui.endCombo();
+    }
+    if (ImGui.isItemHovered()) ImGui.setTooltip("Kaynak dilde tablo düzenlenir. Öbür dilde yalnızca çevrilir sütunların çevirisi düzenlenir (res/ceviri/<dil>/); çevirisi olmayan hücrede kaynak metin soluk görünür, kaynağı değişen çeviri sarıdır.");
   }
 
   function drawRows(table : DataTable) {
@@ -125,10 +156,71 @@ class DataPanel {
       return;
     }
     row.set("id", clean);
-    commit("Kimlik");
+    commit("Kimlik", old == clean ? null : [old => clean]);
   }
 
   function drawCell(table : DataTable, row : DynamicAccess<Dynamic>, column : DataColumn) {
+    if (translating()) {
+      if (column.translatable == true) drawTranslation(table, row, column);
+      else {
+        ImGui.beginDisabled();
+        drawSourceCell(table, row, column);
+        ImGui.endDisabled();
+      }
+      return;
+    }
+    drawSourceCell(table, row, column);
+  }
+
+  // Seçili dildeki çeviri: boşsa kaynak metin ipucu, kaynağı değişmişse sarı. Yazı bitince Translations.put ile tek adım.
+  function drawTranslation(table : DataTable, row : DynamicAccess<Dynamic>, column : DataColumn) {
+    var id : String = row.get("id");
+    var key = '$language/$current', cell = '$id|${column.name}';
+    var layer = editor.translations.tables.get(key);
+    var stored = layer == null ? null : layer.find(id);
+    var saved : String = stored == null || stored.get(column.name) == null ? "" : stored.get(column.name);
+    var source : String = row.get(column.name) == null ? "" : row.get(column.name);
+    var stale = saved != "" && source != "" && stored.get(column.name + Translations.SOURCE_SUFFIX) != Translations.digest(source);
+    var text = typing.exists(cell) ? typing.get(cell) : saved;
+    ImGui.setNextItemWidth(stale ? -ImGui.calcTextSize("Doğru").x - ImGui.getStyle().FramePadding.x * 4 : -1);
+    if (stale) ImGui.pushStyleColor(ImGuiCol.FrameBg, STALE_COLOR);
+    if (ImGui.inputTextWithHint("##ceviri", source, text)) typing.set(cell, text);
+    if (stale) ImGui.popStyleColor();
+    var hovered = ImGui.isItemHovered(), finished = ImGui.isItemDeactivatedAfterEdit();
+    if (stale) {
+      ImGui.sameLine();
+      if (ImGui.smallButton("Doğru")) confirm(id, column.name);
+      if (ImGui.isItemHovered()) ImGui.setTooltip(CONFIRM_TIP);
+    }
+    if (hovered)
+      ImGui.setTooltip('Kaynak (${editor.sourceLanguage}): $source' + (stale ? "\nKaynak değişti: çeviri eskimiş. Gözden geçir; hâlâ doğruysa Doğru." : saved == "" ? "\nÇeviri yok: oyunda kaynak metin görünür." : ""));
+    if (finished && typing.exists(cell)) {
+      translate(id, column.name, typing.get(cell));
+      typing.remove(cell);
+    }
+  }
+
+  // Bir çeviri hücresini yazar (ajanın set_translation aracıyla aynı yol): komutla, geri alınabilir.
+  function translate(id : String, column : String, text : String) {
+    var key = '$language/$current';
+    var before = editor.translations.text(key);
+    var layer = editor.translations.tables.get(key);
+    var result = Translations.put(layer == null ? null : layer.clone(), editor.data.tables.get(current), id, column, text);
+    var after = result.table.write();
+    if (result.ok && after != before) editor.commands.execute(new SetTableCommand('Çeviri ($language)', editor.translations, key, before, after));
+  }
+
+  // Çeviri hâlâ doğru: metin aynı, kaynak özeti bugünkü metinden (ajanın set_translation confirm'üyle aynı yol).
+  function confirm(id : String, column : String) {
+    var key = '$language/$current';
+    var before = editor.translations.text(key), layer = editor.translations.tables.get(key);
+    var result = Translations.confirm(layer == null ? null : layer.clone(), editor.data.tables.get(current), id, column);
+    if (!result.ok) return;
+    var after = result.table.write();
+    if (after != before) editor.commands.execute(new SetTableCommand('Çeviri doğru ($language)', editor.translations, key, before, after));
+  }
+
+  function drawSourceCell(table : DataTable, row : DynamicAccess<Dynamic>, column : DataColumn) {
     var value : Dynamic = row.exists(column.name) ? row.get(column.name) : DataTable.defaultValue(column);
     ImGui.setNextItemWidth(-1);
     switch (column.type) {
@@ -194,6 +286,13 @@ class DataPanel {
       ImGui.sameLine();
       ImGui.textDisabled(TYPE_TITLES[DataTable.TYPES.indexOf(column.type)] + (column.table == null ? "" : ': ${column.table}'));
       ImGui.sameLine();
+      if (column.type == DataTable.TEXT) {
+        var on = column.translatable == true;
+        var name = column.name;
+        if (ImGui.checkbox("Çevrilir", on)) change("Çevrilir", data -> data.column(name).translatable = on);
+        if (ImGui.isItemHovered()) ImGui.setTooltip("Oyuncuya görünen metin: dil başına çevrilir (res/ceviri/<dil>/).");
+        ImGui.sameLine();
+      }
       if (ImGui.smallButton("Sil")) {
         var name = column.name;
         change("Sütun sil", data -> {
@@ -282,7 +381,14 @@ class DataPanel {
     var copy = editor.data.tables.get(current).clone();
     mutate(copy);
     var after = copy.write();
-    if (after != before) editor.commands.execute(new SetTableCommand(label, editor.data, current, before, after));
+    if (after != before) execute(label, before, after, copy);
+  }
+
+  // Tablo komutu ve çevirilerin uyumu tek adım (TranslationSync).
+  function execute(label : String, before : Null<String>, after : String, table : DataTable, ?renamed : Map<String, String>) {
+    var command = new SetTableCommand(label, editor.data, current, before, after);
+    var follow = TranslationSync.commands(editor, current, table, renamed);
+    editor.commands.execute(follow.length == 0 ? command : new scene.editor.commands.GroupCommand(label, [(command : scene.editor.Command)].concat(follow)));
   }
 
   // Sürükleme ve yazma boyunca değer canlı değişir, bırakınca tek adım olur.
@@ -291,9 +397,9 @@ class DataPanel {
     if (ImGui.isItemDeactivatedAfterEdit()) commit(label);
   }
 
-  function commit(label : String) {
+  function commit(label : String, ?renamed : Map<String, String>) {
     var after = editor.data.text(current);
-    if (editStart != null && after != editStart) editor.commands.execute(new SetTableCommand(label, editor.data, current, editStart, after));
+    if (editStart != null && after != editStart) execute(label, editStart, after, editor.data.tables.get(current), renamed);
     editStart = null;
   }
 }
