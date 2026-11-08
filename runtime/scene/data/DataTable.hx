@@ -8,12 +8,15 @@ typedef DataColumn = {
   var type : String;                       // DataTable.TEXT, NUMBER, ...
   @:optional var options : Array<String>;  // seçim sütunu
   @:optional var table : String;           // bağlantı sütunu
+  @:optional var translatable : Bool;      // oyuncuya görünen metin: dil başına çevrilir (Translations)
 }
 
 // Oyun verisi: fraksiyonlar, eşyalar gibi kayıtlar. Her tablo ayrı dosyadır ve her satır tek
 // satıra yazılır: iki kişi farklı tablolarda çalışınca dosyaları çakışmaz.
 class DataTable {
-  public static inline var VERSION = 1;
+  // 2: sütunun translatable işareti (çevrilir metin). 1 de okunur: işaretsiz sayılır.
+  public static inline var VERSION = 2;
+  public static var READABLE(default, never) = [1, 2];
   public static inline var SUFFIX = ".table.json";
   public static inline var TEXT = "metin";
   public static inline var NUMBER = "sayi";
@@ -38,7 +41,7 @@ class DataTable {
 
   public static function read(name : String, text : String) : DataTable {
     var raw : Dynamic = haxe.Json.parse(text);
-    if (raw.version != VERSION) throw '$name tablosunun sürümü desteklenmiyor: ${raw.version}';
+    if (READABLE.indexOf(raw.version) < 0) throw '$name tablosunun sürümü desteklenmiyor: ${raw.version}';
     var table = new DataTable(name, raw.title);
     table.columns = raw.columns;
     var rows : Array<DynamicAccess<Dynamic>> = raw.rows;
@@ -84,6 +87,11 @@ class DataTable {
     return null;
   }
 
+  // Çevrilir sütunların adları (oyuncuya görünen metin).
+  public function translatableColumns() : Array<String> {
+    return [for (item in columns) if (item.translatable == true) item.name];
+  }
+
   public static function defaultValue(column : DataColumn) : Dynamic {
     return switch (column.type) {
       case NUMBER: 0.;
@@ -113,6 +121,7 @@ class DataTable {
     var parts = ['"name": ${quote(column.name)}', '"title": ${quote(column.title)}', '"type": ${quote(column.type)}'];
     if (column.options != null) parts.push('"options": ' + SceneFormat.writeValue(column.options));
     if (column.table != null) parts.push('"table": ${quote(column.table)}');
+    if (column.translatable == true) parts.push('"translatable": true');
     return "{" + parts.join(", ") + "}";
   }
 

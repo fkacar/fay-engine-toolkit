@@ -2436,6 +2436,30 @@ class TestMain {
     check(!data.exists("esyalar", "yok"), "olmayan satır");
     check(!data.exists("yok", "kilic"), "olmayan tablo");
 
+    // Biçim 2: çevrilir sütun işareti. Biçim 1 okunur (işaretsiz), bilinmeyen sürüm okunmaz.
+    read.columns[0].translatable = true;
+    var marked = read.write();
+    check(marked.indexOf('"version": 2') >= 0 && marked.indexOf('"translatable": true') >= 0, "işaret ve sürüm yazılmalı");
+    equals(DataTable.read("esyalar", marked).translatableColumns().join(","), "ad", "işaret okunmalı");
+    equals(DataTable.read("esyalar", StringTools.replace(text, '"version": 2', '"version": 1')).translatableColumns().length, 0, "biçim 1 okunmalı");
+    var refused = false;
+    try DataTable.read("esyalar", StringTools.replace(text, '"version": 2', '"version": 3')) catch (e : Dynamic) refused = true;
+    check(refused, "bilinmeyen sürüm okunmamalı");
+
+    // Çeviri katmanı: hücre, özet, eksik ve eskimiş.
+    var source = DataTable.read("esyalar", marked);
+    var tr = scene.data.Translations.put(null, source, "kilic", "ad", "Kılıç").table;
+    check(!scene.data.Translations.put(tr, source, "kilic", "deger", "9").ok, "çevrilir olmayan sütun yazılmamalı");
+    check(!scene.data.Translations.put(tr, source, "yok", "ad", "Yok").ok, "kaynakta olmayan satır yazılmamalı");
+    var layer = ["ceviri/tr/esyalar.table.json" => tr.write()];
+    var translations = new scene.data.Translations(path -> layer.get(path));
+    equals(translations.text("tr", "esyalar", "kilic", "ad"), "Kılıç", "çeviri hücresi");
+    equals(translations.text("de", "esyalar", "kilic", "ad"), null, "çevirisi olmayan dil");
+    equals(translations.audit("tr", source).stale.length, 0, "taze çeviri");
+    source.find("kilic").set("ad", "Kılıç (yeni)");
+    equals(translations.audit("tr", source).stale.join(","), "kilic.ad", "kaynak değişince eskimiş");
+    equals(scene.data.Translations.digest("Kılıç"), haxe.crypto.Md5.encode("Kılıç").substr(0, 8), "özet UTF-8 MD5'in başı");
+
     // Derleme: tablodan silinen satırı kullanan sahne durur
     var schema = new SceneSchema();
     schema.add(["spawn"], ["faction" => "String"], null, ["faction" => "fraksiyonlar"]);
