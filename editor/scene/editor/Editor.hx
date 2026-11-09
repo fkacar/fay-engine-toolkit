@@ -48,6 +48,7 @@ class Editor {
   static inline var WORLD = "Dünya";
   static inline var DATA = "Veri";
   static inline var DIALOGS = "Diyaloglar";
+  static inline var TRANSLATIONS = "Çeviriler";
   static inline var AGENT = "Ajan";
   static inline var DIRTY_POPUP = "Kaydedilmemiş değişiklik";
   static inline var SAVE_AS_POPUP = "Farklı kaydet";
@@ -103,7 +104,10 @@ class Editor {
   public var inspector(default, null) : InspectorPanel;
   var assets : AssetBrowser;
   var worldPanel : WorldPanel;
-  var dataPanel : DataPanel;
+  public var dataPanel(default, null) : DataPanel;
+  public var translationPanel(default, null) : scene.editor.panels.TranslationPanel;
+  // Bir sonraki karede Veri paneli öne gelir (Çeviriler panelinden atlama).
+  var showData = false;
   var dialogPanel : DialogPanel;
   var keyboardPanelFocused = false;
   var session = new PlaySession();
@@ -179,6 +183,7 @@ class Editor {
     dialogs.attach(this);
     dialogWorkspace = new DialogWorkspace(this);
     dialogPanel = new DialogPanel(this);
+    translationPanel = new scene.editor.panels.TranslationPanel(this);
     if (WorldData.isWorldFile(path)) document.open(path);
     document.validate();
     for (type in document.prefs.hiddenMarkers) Marker.hiddenTypes.set(type, true);
@@ -190,6 +195,7 @@ class Editor {
     addPanel(WORLD, worldPanel.draw);
     addPanel(DATA, dataPanel.draw);
     addPanel(DIALOGS, dialogPanel.draw);
+    addPanel(TRANSLATIONS, translationPanel.draw);
 
     savesWindow = new scene.editor.panels.SavesWindow(this);
     agent = new AgentServer(AgentServer.PORT, ContextTools.INSTRUCTIONS);
@@ -200,6 +206,12 @@ class Editor {
     new EditTools(this, agent);
     new ExamTools(this, agent);
     ContextTools.prompts(agent);
+  }
+
+  // Veri panelinde bir tablonun satırı, verilen dilde (Çeviriler panelinden atlama): panel öne gelir, satır görünür.
+  public function revealData(table : String, row : String, language : String) {
+    dataPanel.reveal(table, row, language);
+    showData = true;
   }
 
   public function addPanel(title : String, draw : Void->Void) {
@@ -235,6 +247,8 @@ class Editor {
       ImGui.setWindowFocus(INSPECTOR);
     }
     showAssets = false;
+    if (showData) ImGui.setWindowFocus(DATA);
+    showData = false;
     section("Sahne görünümü", () -> viewport.update(dt));
     section("Bildirim", drawNotice);
     section("Açılır pencereler", drawPopups);
@@ -900,6 +914,7 @@ class Editor {
     ImGui.dockBuilderDockWindow(WARNINGS, bottom);
     ImGui.dockBuilderDockWindow(DATA, bottom);
     ImGui.dockBuilderDockWindow(DIALOGS, bottom);
+    ImGui.dockBuilderDockWindow(TRANSLATIONS, bottom);
     ImGui.dockBuilderDockWindow(AGENT, bottom);
     ImGui.dockBuilderDockWindow(ASSETS, bottom);
     ImGui.dockBuilderFinish(dock);

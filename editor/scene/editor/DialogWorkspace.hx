@@ -96,6 +96,12 @@ class DialogWorkspace {
     sceneSelection = editor.selection.items.copy();
   }
 
+  // Diyalog verilen dilde açılır (Çeviriler panelinden atlama): kaynak dil dışındaysa düğümün çevirisi düzenlenir.
+  public function openIn(id : String, node : Int, code : String) {
+    open(id, node);
+    if (isOpen && editor.languages.indexOf(code) >= 0) language = code;
+  }
+
   public function close() {
     isOpen = false;
     previewNode = 0;

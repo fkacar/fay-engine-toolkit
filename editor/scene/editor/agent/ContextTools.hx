@@ -57,7 +57,7 @@ class ContextTools {
       offset: {type: "integer"}, limit: {type: "integer"},
     }, find);
     tool("get_entity", "Bir nesnenin tamamı: dönüşüm, hücre, üst ve alt nesneler, prefab ve farkları, bileşenler ve her alanın Inspector etiketi, değeri, türü, sınırları ve seçenekleri; uyarıları; altında yürünebilirlik; bu nesneye bağlananlar.", {id: {type: "string"}}, args -> entity(args.id), ["id"]);
-    tool("get_schema", "Bileşen ve işaretçi türleri, alanları, grupları; tablolar ve sütunları; diyalog düğüm türleri; birimler.", {}, _ -> schema());
+    tool("get_schema", "Bileşen ve işaretçi türleri, alanları, grupları; tabloların adı, başlığı, satır sayısı, sütun adları ve çevrilir sütunları (sütunların türü, seçenekleri ve satırlar get_table'da); diyalog düğüm türleri; birimler.", {}, _ -> schema());
     tool("get_warnings", "Uyarılar panelinin tamamı: nesne, diyalog ve düğüm kimlikleriyle; dışarıda değişen ve çakışan dosyalar; editörün yazdığı satırlar (oyun ve editör hataları) ve hata verip duran paneller.", {}, _ -> warnings());
     tool("get_document_text", "Kaydedilmemiş değişiklikler. path verilmezse kaydedilmemiş bütün dosyaların diskle farkı. path verilirse o dosyanın farkı; full true ise editördeki tam metni de (kaydedilince yazılacak hal).", {
       path: {type: "string", description: "res/ ile başlayan yol"}, full: {type: "boolean"},
@@ -526,9 +526,12 @@ class ContextTools {
     return {
       units: "metre, derece, Z yukarı. Hücre 180 m.",
       components: components,
+      // Tablolar kısaca: sütunların türü ve seçenekleri get_table'da. Şema araç çıktısının sınırına (AgentServer.MAX_TEXT)
+      // sığmalı; Agent sınaması payını denetler.
       tables: [for (name in editor.data.names()) {
         var data = editor.data.tables.get(name);
-        {name: name, title: data.title, columns: data.columns, rows: data.rows.length};
+        {name: name, title: data.title, rows: data.rows.length, columns: [for (column in data.columns) column.name],
+          translatable: data.translatableColumns()};
       }],
       dialogNodes: [for (type => title in DialogWorkspace.TITLES) {type: type, title: title}],
     };

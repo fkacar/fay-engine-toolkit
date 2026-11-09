@@ -18,6 +18,8 @@ class DialogRunner {
   var dialog : Dialog;
   var story : Story;
   var current : Null<DialogNode>;
+  // Ekranda kalan son satır (seçenekteyken de görünür): dil değişince yeniden çevrilir.
+  var line : Null<DialogNode>;
 
   public function new(dialog : Dialog, story : Story) {
     this.dialog = dialog;
@@ -47,17 +49,14 @@ class DialogRunner {
     while (current != null && steps++ < STEP_LIMIT) {
       switch (current.type) {
         case Dialog.LINE:
-          var who = current.speaker == null ? "" : current.speaker;
-          speaker = who == "" || story.speakerName == null ? who : story.speakerName(who);
-          text = translated(Dialog.lineKey(current), current.text == null ? "" : current.text);
+          line = current;
+          showLine();
           choices = [];
           if (story.log != null) story.log.add("satir", {dialog: dialog.id, node: current.id, speaker: speaker, text: text});
           return;
         case Dialog.CHOICES:
           var node = current;
-          sourceChoices = [for (choice in node.choices) choice.text];
-          choiceKeys = [for (choice in node.choices) Dialog.choiceKey(node, choice)];
-          choices = [for (i in 0...node.choices.length) translated(choiceKeys[i], sourceChoices[i])];
+          showChoices(node);
           if (story.log != null) story.log.add("secenekler", {dialog: dialog.id, node: current.id, choices: choices});
           return;
         case Dialog.CONDITION:
@@ -76,6 +75,24 @@ class DialogRunner {
     }
     finished = true;
     if (story.log != null) story.log.add("diyalog_bitti", {dialog: dialog.id});
+  }
+
+  // Dil değişti: bulunduğu düğümün yazıları (son satır, seçenekler) yeni dille. İlerlemez, günlüğe yazmaz.
+  public function retranslate() {
+    if (line != null) showLine();
+    if (current != null && current.type == Dialog.CHOICES) showChoices(current);
+  }
+
+  function showLine() {
+    var who = line.speaker == null ? "" : line.speaker;
+    speaker = who == "" || story.speakerName == null ? who : story.speakerName(who);
+    text = translated(Dialog.lineKey(line), line.text == null ? "" : line.text);
+  }
+
+  function showChoices(node : DialogNode) {
+    sourceChoices = [for (choice in node.choices) choice.text];
+    choiceKeys = [for (choice in node.choices) Dialog.choiceKey(node, choice)];
+    choices = [for (i in 0...node.choices.length) translated(choiceKeys[i], sourceChoices[i])];
   }
 
   function translated(key : String, source : String) : String {

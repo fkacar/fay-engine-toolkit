@@ -38,6 +38,12 @@ class DataPanel {
   var language = "";
   // Yazılmakta olan çeviri hücreleri (satır|sütun → metin): bırakınca tek geri alma adımı olur.
   var typing = new Map<String, String>();
+  // Gösterilecek satır (Çeviriler panelinden atlama): bir kez kaydırılır, kısa süre vurgulanır.
+  var focusRow : Null<String>;
+  var focusScroll = false;
+  var focusUntil = 0.;
+  static inline var FOCUS_SECONDS = 1.5;
+  static var FOCUS_COLOR = 0x5530A0E0;
 
   public function new(editor : Editor) {
     this.editor = editor;
@@ -72,6 +78,20 @@ class DataPanel {
     if (ImGui.collapsingHeader("Sütunlar")) drawColumns(table);
   }
 
+  // Tablo, satır ve dil seçilir; satır bir sonraki çizimde görünür yere kaydırılır ve vurgulanır.
+  public function reveal(table : String, row : String, code : String) {
+    if (!editor.data.tables.exists(table)) return;
+    current = table;
+    language = code;
+    focusRow = row;
+    focusScroll = true;
+    focusUntil = haxe.Timer.stamp() + FOCUS_SECONDS;
+  }
+
+  public function shown() : {table : String, language : String, row : Null<String>} {
+    return {table: current, language: language, row: focusRow};
+  }
+
   function translating() : Bool {
     return language != "" && language != editor.sourceLanguage && editor.languages.indexOf(language) >= 0;
   }
@@ -104,6 +124,11 @@ class DataPanel {
     for (i in 0...table.rows.length) {
       var row = table.rows[i];
       ImGui.tableNextRow();
+      if (focusRow != null && row.get("id") == focusRow) {
+        if (focusScroll) ImGui.setScrollHereY(0.5);
+        focusScroll = false;
+        if (haxe.Timer.stamp() < focusUntil) ImGui.tableSetBGColor(ImGuiTableBgTarget.RowBg1, FOCUS_COLOR);
+      }
       ImGui.pushID('$i');
       ImGui.tableNextColumn();
       drawId(table, row);

@@ -263,6 +263,14 @@ class InspectorPanel {
           case HRef(table):
             var data = editor.data.tables.get(table);
             drawOptions(peers, field, label, before, data == null ? [] : data.ids(), true, id -> data == null ? id : data.label(id));
+            // Satırı Veri panelinde aç; yeni satır aç ve alanı ona bağla (metni orada yazılır, çevirisi Dil seçicisiyle).
+            if (data != null) {
+              if (data.find(before) != null) {
+                if (ImGui.smallButton("Satırı aç##" + field.name)) editor.revealData(table, before, editor.sourceLanguage);
+                ImGui.sameLine();
+              }
+              if (ImGui.smallButton("Yeni satır##" + field.name)) newRow(peers, field, table);
+            }
           default:
             var value : String = before;
             var edited = ImGui.inputText(label, value);
@@ -377,6 +385,19 @@ class InspectorPanel {
   public function setField(peers : Array<Component>, name : String, value : Dynamic) {
     var field = Lambda.find(peers[peers.length - 1].describeFields(), f -> f.name == name);
     if (field != null) set(peers, field, value);
+  }
+
+  // Bağlı tabloya yeni satır ve alan ona: tek geri alma adımı; satır Veri panelinde açılır.
+  public function newRow(peers : Array<Component>, field : FieldInfo, table : String) {
+    var data = editor.data.tables.get(table);
+    if (data == null) return;
+    var before = editor.data.text(table), copy = data.clone();
+    var id = copy.freeId(field.name);
+    copy.addRow(id);
+    var commands : Array<Command> = [new scene.editor.commands.SetTableCommand('Yeni satır ($table)', editor.data, table, before, copy.write())];
+    for (component in peers) commands.push(new SetFieldCommand(component, field.name, component.readField(field.name), id, field.label));
+    editor.commands.execute(new GroupCommand('Yeni satır ($table)', commands));
+    editor.revealData(table, id, editor.sourceLanguage);
   }
 
   function set(peers : Array<Component>, field : FieldInfo, value : Dynamic) {

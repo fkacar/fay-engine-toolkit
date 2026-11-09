@@ -1,5 +1,7 @@
 package scene.editor.agent;
 
+import scene.editor.TranslationStatus;
+
 import haxe.io.Path;
 import sys.FileSystem;
 import scene.Component;
@@ -459,23 +461,13 @@ class EditTools {
     return column;
   }
 
-  // Çevrilir kaynaklar: çevrilir sütunu olan tablolar ve diyaloglar ("diyaloglar/<id>", Dialog.texts).
-  function translatableSources() : Array<String> {
-    var names = [for (name in editor.data.names()) if (editor.data.tables.get(name).translatableColumns().length > 0) name];
-    for (id in editor.dialogs.ids()) names.push(Dialog.textTableName(id));
-    return names;
-  }
-
+  // Çevrilir kaynaklar ve durumları: Çeviriler paneliyle aynı yol (TranslationStatus).
   function sourceOf(name : String) : Null<DataTable> {
-    if (StringTools.startsWith(name, Dialog.TEXT_TABLE_PREFIX)) {
-      var dialog = editor.dialogs.dialogs.get(name.substr(Dialog.TEXT_TABLE_PREFIX.length));
-      return dialog == null ? null : dialog.texts();
-    }
-    return editor.data.tables.get(name);
+    return TranslationStatus.source(editor, name);
   }
 
   function translationLanguages(wanted : Null<String>) : Array<String> {
-    var others = [for (code in editor.languages) if (code != editor.sourceLanguage) code];
+    var others = TranslationStatus.others(editor);
     if (others.length == 0) throw "Oyun dil bildirmiyor (çeviri yok)";
     if (wanted == null) return others;
     if (wanted == editor.sourceLanguage) throw '$wanted kaynak dil: tabloların kendisi (edit_table)';
@@ -487,30 +479,22 @@ class EditTools {
   function listTranslations(args : Dynamic) : Dynamic {
     var languages = translationLanguages(args.language);
     var limit : Int = args.limit == null ? 50 : args.limit, shown = 0;
-    var names = args.table == null ? translatableSources() : [args.table];
-    var reader = new scene.data.Translations(path -> {
-      var prefix = scene.data.Translations.DIRECTORY + "/";
-      editor.translations.text(path.substring(prefix.length, path.length - DataTable.SUFFIX.length));
-    });
+    var names : Array<String> = args.table == null ? TranslationStatus.sources(editor) : [(args.table : String)];
+    var reader = TranslationStatus.reader(editor);
+    for (name in names) if (sourceOf(name) == null) throw 'Tablo ya da diyalog yok: $name';
     var tables = [];
-    for (name in names) {
-      var source = sourceOf(name);
-      if (source == null) throw 'Tablo ya da diyalog yok: $name';
-      var columns = source.translatableColumns();
-      if (columns.length == 0) continue;
-      for (language in languages) {
-        var audit = reader.audit(language, source);
-        var cells = [];
-        for (row in source.rows) for (column in columns) {
-          var id : String = row.get("id"), key = '$id.$column';
-          var missing = audit.missing.indexOf(key) >= 0, stale = audit.stale.indexOf(key) >= 0;
-          if (!(args.all == true || missing || stale) || row.get(column) == null || row.get(column) == "" || shown >= limit) continue;
-          shown++;
-          cells.push({row: id, column: column, source: row.get(column), translation: reader.text(language, name, id, column),
-            state: missing ? "eksik" : stale ? "eskimiş" : "tamam"});
-        }
-        tables.push({table: name, language: language, missing: audit.missing.length, stale: audit.stale.length, extra: audit.extra, cells: cells});
+    for (audit in TranslationStatus.report(editor, languages, names)) {
+      var name = audit.table, language = audit.language, source = sourceOf(name), columns = source.translatableColumns();
+      var cells = [];
+      for (row in source.rows) for (column in columns) {
+        var id : String = row.get("id"), key = '$id.$column';
+        var missing = audit.missing.indexOf(key) >= 0, stale = audit.stale.indexOf(key) >= 0;
+        if (!(args.all == true || missing || stale) || row.get(column) == null || row.get(column) == "" || shown >= limit) continue;
+        shown++;
+        cells.push({row: id, column: column, source: row.get(column), translation: reader.text(language, name, id, column),
+          state: missing ? "eksik" : stale ? "eskimiş" : "tamam"});
       }
+      tables.push({table: name, language: language, missing: audit.missing.length, stale: audit.stale.length, extra: audit.extra, cells: cells});
     }
     return {source: editor.sourceLanguage, languages: languages, tables: tables, truncated: shown >= limit};
   }

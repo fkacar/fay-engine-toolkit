@@ -5,7 +5,9 @@ import sys.FileSystem;
 
 // seed: oyun olaylarının rastgele akışlarının kökü (RandomStreams). ended/result: Ironman'da ekip tükenince
 // sefer biter; kayıtları silinmez, salt okunur kalır.
-typedef CampaignInfo = {id : String, name : String, created : Float, ironman : Bool, version : String, ?seed : Int, ?ended : Bool, ?result : String};
+// title: oyunun dile göre kurduğu ad (anahtar ve değişkenler; oyun çözer). Varsa name yerine gösterilir; name o anki
+// dilde yazılmış hâlidir (eski okuyucular ve günlükler için).
+typedef CampaignInfo = {id : String, name : String, created : Float, ironman : Bool, version : String, ?seed : Int, ?ended : Bool, ?result : String, ?title : Dynamic};
 typedef SaveEntry = {path : String, kind : String, modified : Float, campaign : String};
 
 // Seferler ve yuvalar: <kök>/<sefer>/{sefer.json, elle_<tarih>.kayit, hizli.kayit, oto_1..3.kayit, ironman.kayit}.
@@ -53,9 +55,10 @@ class SaveSlots {
     return Std.random(0x7FFFFFFF);
   }
 
-  public function createCampaign(name : String, ironman : Bool, version : String, ?seed : Int) : CampaignInfo {
+  public function createCampaign(name : String, ironman : Bool, version : String, ?seed : Int, ?title : Dynamic) : CampaignInfo {
     var id = DateTools.format(Date.now(), "%Y%m%d_%H%M%S") + "_" + StringTools.hex(Std.random(0xFFFFFF), 6).toLowerCase();
     var info : CampaignInfo = {id: id, name: name, created: Date.now().getTime(), ironman: ironman, version: version, seed: seed == null ? newSeed() : seed};
+    if (title != null) info.title = title;
     updateCampaign(info);
     return info;
   }

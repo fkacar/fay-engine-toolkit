@@ -1,5 +1,7 @@
 package scene.editor.agent;
 
+import scene.editor.TranslationStatus;
+
 import scene.Entity;
 import scene.PlayFiles;
 import scene.data.SceneFormat;
@@ -255,6 +257,22 @@ class ExamTools {
         var value : Dynamic = row == null ? null : row.get(spec.column);
         var ok = Std.isOfType(spec.value, Float) && Std.isOfType(value, Float) ? Math.abs((spec.value : Float) - (value : Float)) < 1e-6 : value == spec.value;
         return {ok: ok, detail: '${spec.table}.${spec.row}.${spec.column} = $value'};
+      // Çeviri (docs/DIL_PLANI.md, D8): hücrenin bu dilde çevirisi var, eskimiş değil; differs true ise kaynak metinden farklı.
+      case "translation":
+        var source = TranslationStatus.source(editor, spec.table);
+        var row = source == null ? null : source.find(spec.row);
+        var original : Null<String> = row == null ? null : row.get(spec.column);
+        var layer = TranslationStatus.reader(editor), text = layer.text(spec.language, spec.table, spec.row, spec.column);
+        var stale = source != null && layer.audit(spec.language, source).stale.indexOf('${spec.row}.${spec.column}') >= 0;
+        var ok = text != null && text != "" && !stale && (spec.differs != true || text != original);
+        return {ok: ok, detail: '${spec.language}/${spec.table}/${spec.row}.${spec.column}: ${text == null ? "çeviri yok" : '"$text"'}'
+          + (stale ? " (eskimiş)" : "") + ' (kaynak "$original")'};
+      // Bir dilde bütün tablolar ve diyaloglar tam: eksik ve eskimiş çeviri yok.
+      case "translations_complete":
+        var left = [];
+        for (report in TranslationStatus.report(editor, [spec.language]))
+          for (key in report.missing.concat(report.stale)) left.push('${report.table}/$key');
+        return {ok: left.length == 0, detail: left.length == 0 ? '${spec.language} tam' : '${left.length} kaldı: ${left.slice(0, 6).join(", ")}'};
       default:
         if (checks.exists(spec.type)) return checks.get(spec.type)(spec, created);
         throw 'bilinmeyen kontrol: ${spec.type}';
